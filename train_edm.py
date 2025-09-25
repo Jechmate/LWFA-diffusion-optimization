@@ -34,8 +34,8 @@ def train(args, model=None, finetune=False):
     setup_logging(args.run_name)
     device = args.device
 
-    data_dir = "data/spectra"  # Directory containing the spectrum CSV files
-    params_file = "data/params.csv"
+    data_dir = args.data_path  # Directory containing the spectrum CSV files
+    params_file = args.csv_path
     
     # Create dataloader with exclusions
     exclude_paths = []
@@ -227,8 +227,8 @@ def train_with_exclusions(exclude_experiments=None):
     args.lr = 1e-3
     args.grad_acc = 1
     args.sample_freq = 1000
-    args.data_path = "data/spectra"
-    args.csv_path = "data/params.csv"
+    args.data_path = "spectra"
+    args.csv_path = "params.csv"
     args.sample_settings = [20, 15, 30]
 
     if exclude_experiments is None:
@@ -261,10 +261,10 @@ def launch():
     # Specify which experiments to exclude during training
     # Each number corresponds to a folder name in data/spectra/
     # Set to None or empty list to train without exclusions
-    exclude_experiments = [3, 8, 11, 19, 21]  # Example: exclude experiments 3, 8, 11, 19, 21
+    # exclude_experiments = [3, 8, 11, 19, 21]  # Example: exclude experiments 3, 8, 11, 19, 21
     
     # Uncomment the line below to train without any exclusions
-    # exclude_experiments = None
+    exclude_experiments = None
     
     train_with_exclusions(exclude_experiments)
 
