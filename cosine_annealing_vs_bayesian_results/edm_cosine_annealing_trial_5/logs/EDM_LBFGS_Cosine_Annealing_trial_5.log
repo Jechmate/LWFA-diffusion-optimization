@@ -1,0 +1,58 @@
+2025-09-22 11:29:32 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Starting optimization: EDM_LBFGS_Cosine_Annealing
+2025-09-22 11:29:32 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Trial number: 5
+2025-09-22 11:29:32 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Log file: cosine_annealing_vs_bayesian_results/edm_cosine_annealing_trial_5/logs/EDM_LBFGS_Cosine_Annealing_trial_5.log
+2025-09-22 11:29:32 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - ============================================================
+2025-09-22 11:29:32 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - OPTIMIZATION INITIALIZATION
+2025-09-22 11:29:32 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - ============================================================
+2025-09-22 11:29:32 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Initial parameters:
+2025-09-22 11:29:32 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO -   Laser energy: 34.1028
+2025-09-22 11:29:32 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO -   Pressure: 20.5504
+2025-09-22 11:29:32 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO -   Acquisition time: 13.5733ms
+2025-09-22 11:29:32 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Optimization steps: 50
+2025-09-22 11:29:32 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Learning rate: 0.1
+2025-09-22 11:29:32 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Batch size: 32
+2025-09-22 11:29:32 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Cosine annealing - T_max: 50, eta_min: 1e-06
+2025-09-22 11:29:32 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - ============================================================
+2025-09-22 11:29:32 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - STARTING OPTIMIZATION LOOP
+2025-09-22 11:29:32 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - ============================================================
+2025-09-22 11:29:33 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - NEW BEST at step 0: 2486.716553
+2025-09-22 11:29:33 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step   0: WSum=2486.716553, Loss=-2486.716553, LR=0.100000 | Laser=34.1028 (Δ+0.0000), Press=20.5504 (Δ+0.0000), Time=13.5733 (Δ+0.0000)ms
+2025-09-22 11:29:42 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - NEW BEST at step 1: 2953.842529
+2025-09-22 11:29:42 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step   1: WSum=2953.842529, Loss=-2953.842529, LR=0.099901 | Laser=35.6243 (Δ+1.5215), Press=17.4773 (Δ-3.0731), Time=20.4879 (Δ+6.9146)ms
+2025-09-22 11:29:50 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - NEW BEST at step 2: 3458.610352
+2025-09-22 11:29:50 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step   2: WSum=3458.610352, Loss=-3458.610352, LR=0.099606 | Laser=37.5850 (Δ+1.9607), Press=16.8270 (Δ-0.6504), Time=23.2849 (Δ+2.7970)ms
+2025-09-22 11:29:59 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step   3: WSum=3330.049316, Loss=-3330.049316, LR=0.099114 | Laser=37.6287 (Δ+0.0437), Press=16.8390 (Δ+0.0121), Time=23.2547 (Δ-0.0302)ms
+2025-09-22 11:30:08 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step   4: WSum=3368.402100, Loss=-3368.402100, LR=0.098429 | Laser=37.6349 (Δ+0.0062), Press=16.8382 (Δ-0.0009), Time=23.2520 (Δ-0.0027)ms
+2025-09-22 11:30:17 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step   5: WSum=3027.426270, Loss=-3027.426270, LR=0.097553 | Laser=37.7253 (Δ+0.0904), Press=16.7037 (Δ-0.1344), Time=23.3376 (Δ+0.0856)ms
+2025-09-22 11:30:26 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - NEW BEST at step 6: 3501.378906
+2025-09-22 11:30:26 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step   6: WSum=3501.378906, Loss=-3501.378906, LR=0.096489 | Laser=37.9729 (Δ+0.2476), Press=16.3354 (Δ-0.3683), Time=23.5717 (Δ+0.2341)ms
+2025-09-22 11:30:35 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step   7: WSum=3372.115723, Loss=-3372.115723, LR=0.095241 | Laser=37.9733 (Δ+0.0004), Press=16.3349 (Δ-0.0005), Time=23.5721 (Δ+0.0004)ms
+2025-09-22 11:30:44 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - NEW BEST at step 8: 3580.900391
+2025-09-22 11:30:44 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step   8: WSum=3580.900391, Loss=-3580.900391, LR=0.093815 | Laser=37.9734 (Δ+0.0001), Press=16.3348 (Δ-0.0000), Time=23.5722 (Δ+0.0001)ms
+2025-09-22 11:30:53 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step   9: WSum=3395.389160, Loss=-3395.389160, LR=0.092216 | Laser=37.9784 (Δ+0.0049), Press=16.3342 (Δ-0.0006), Time=23.5757 (Δ+0.0035)ms
+2025-09-22 11:31:02 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step  10: WSum=3495.834961, Loss=-3495.834961, LR=0.090451 | Laser=37.9785 (Δ+0.0001), Press=16.3342 (Δ-0.0000), Time=23.5757 (Δ+0.0001)ms
+2025-09-22 11:31:20 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - NEW BEST at step 12: 3729.626709
+2025-09-22 11:31:39 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step  15: WSum=3206.011475, Loss=-3206.011475, LR=0.079389 | Laser=37.9790 (Δ+0.0000), Press=16.3344 (Δ+0.0000), Time=23.5757 (Δ+0.0000)ms
+2025-09-22 11:31:52 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step  20: WSum=3391.763672, Loss=-3391.763672, LR=0.065451 | Laser=37.9790 (Δ+0.0000), Press=16.3344 (Δ+0.0000), Time=23.5757 (Δ+0.0000)ms
+2025-09-22 11:31:58 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step  25: WSum=3680.093506, Loss=-3680.093506, LR=0.050001 | Laser=37.9790 (Δ+0.0000), Press=16.3344 (Δ+0.0000), Time=23.5757 (Δ+0.0000)ms
+2025-09-22 11:31:59 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - NEW BEST at step 26: 4084.056885
+2025-09-22 11:32:03 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step  30: WSum=3105.920654, Loss=-3105.920654, LR=0.034550 | Laser=37.9790 (Δ+0.0000), Press=16.3344 (Δ+0.0000), Time=23.5757 (Δ+0.0000)ms
+2025-09-22 11:32:09 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step  35: WSum=3641.524414, Loss=-3641.524414, LR=0.020612 | Laser=37.9790 (Δ+0.0000), Press=16.3344 (Δ+0.0000), Time=23.5757 (Δ+0.0000)ms
+2025-09-22 11:32:14 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step  40: WSum=3436.187744, Loss=-3436.187744, LR=0.009550 | Laser=37.9790 (Δ+0.0000), Press=16.3344 (Δ+0.0000), Time=23.5757 (Δ+0.0000)ms
+2025-09-22 11:32:19 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step  45: WSum=3456.366943, Loss=-3456.366943, LR=0.002448 | Laser=37.9790 (Δ+0.0000), Press=16.3344 (Δ+0.0000), Time=23.5757 (Δ+0.0000)ms
+2025-09-22 11:32:20 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step  46: WSum=3444.090576, Loss=-3444.090576, LR=0.001572 | Laser=37.9790 (Δ+0.0000), Press=16.3344 (Δ+0.0000), Time=23.5757 (Δ+0.0000)ms
+2025-09-22 11:32:21 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step  47: WSum=3362.098633, Loss=-3362.098633, LR=0.000887 | Laser=37.9790 (Δ+0.0000), Press=16.3344 (Δ+0.0000), Time=23.5757 (Δ+0.0000)ms
+2025-09-22 11:32:23 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step  48: WSum=3192.951904, Loss=-3192.951904, LR=0.000395 | Laser=37.9790 (Δ+0.0000), Press=16.3344 (Δ+0.0000), Time=23.5757 (Δ+0.0000)ms
+2025-09-22 11:32:24 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Step  49: WSum=3243.511230, Loss=-3243.511230, LR=0.000100 | Laser=37.9790 (Δ+0.0000), Press=16.3344 (Δ+0.0000), Time=23.5757 (Δ+0.0000)ms
+2025-09-22 11:32:24 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - ============================================================
+2025-09-22 11:32:24 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - OPTIMIZATION COMPLETED
+2025-09-22 11:32:24 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - ============================================================
+2025-09-22 11:32:24 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Best weighted sum achieved: 4084.056885
+2025-09-22 11:32:24 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Final parameters:
+2025-09-22 11:32:24 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO -   Laser energy: 37.9790
+2025-09-22 11:32:24 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO -   Pressure: 16.3344
+2025-09-22 11:32:24 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO -   Acquisition time: 23.5757ms
+2025-09-22 11:32:24 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO - Total parameter changes:
+2025-09-22 11:32:24 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO -   Laser energy: +3.8761
+2025-09-22 11:32:24 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO -   Pressure: -4.2161
+2025-09-22 11:32:24 - EDM_LBFGS_Cosine_Annealing_trial_5 - INFO -   Acquisition time: +10.0024ms

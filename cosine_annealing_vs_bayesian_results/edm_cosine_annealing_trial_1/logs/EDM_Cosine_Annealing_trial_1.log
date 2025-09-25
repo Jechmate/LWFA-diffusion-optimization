@@ -1,0 +1,19 @@
+2025-09-19 17:16:36 - EDM_Cosine_Annealing_trial_1 - INFO - Starting optimization: EDM_Cosine_Annealing
+2025-09-19 17:16:36 - EDM_Cosine_Annealing_trial_1 - INFO - Trial number: 1
+2025-09-19 17:16:36 - EDM_Cosine_Annealing_trial_1 - INFO - Log file: cosine_annealing_vs_bayesian_results/edm_cosine_annealing_trial_1/logs/EDM_Cosine_Annealing_trial_1.log
+2025-09-19 17:16:36 - EDM_Cosine_Annealing_trial_1 - INFO - ============================================================
+2025-09-19 17:16:36 - EDM_Cosine_Annealing_trial_1 - INFO - OPTIMIZATION INITIALIZATION
+2025-09-19 17:16:36 - EDM_Cosine_Annealing_trial_1 - INFO - ============================================================
+2025-09-19 17:16:36 - EDM_Cosine_Annealing_trial_1 - INFO - Initial parameters:
+2025-09-19 17:16:36 - EDM_Cosine_Annealing_trial_1 - INFO -   Laser energy: 21.2362
+2025-09-19 17:16:36 - EDM_Cosine_Annealing_trial_1 - INFO -   Pressure: 29.0143
+2025-09-19 17:16:36 - EDM_Cosine_Annealing_trial_1 - INFO -   Acquisition time: 31.9598ms
+2025-09-19 17:16:36 - EDM_Cosine_Annealing_trial_1 - INFO - Optimization steps: 50
+2025-09-19 17:16:36 - EDM_Cosine_Annealing_trial_1 - INFO - Learning rate: 2
+2025-09-19 17:16:36 - EDM_Cosine_Annealing_trial_1 - INFO - Batch size: 16
+2025-09-19 17:16:36 - EDM_Cosine_Annealing_trial_1 - INFO - Cosine annealing - T_max: 50, eta_min: 1e-06
+2025-09-19 17:16:36 - EDM_Cosine_Annealing_trial_1 - INFO - ============================================================
+2025-09-19 17:16:36 - EDM_Cosine_Annealing_trial_1 - INFO - STARTING OPTIMIZATION LOOP
+2025-09-19 17:16:36 - EDM_Cosine_Annealing_trial_1 - INFO - ============================================================
+2025-09-19 17:16:42 - EDM_Cosine_Annealing_trial_1 - INFO - NEW BEST at step 0: 1494.320312
+2025-09-19 17:16:42 - EDM_Cosine_Annealing_trial_1 - INFO - Step   0: WSum=1494.320312, Loss=-1494.320312, LR=2.000000 | Laser=21.2362 (Δ+0.0000), Press=29.0143 (Δ+0.0000), Time=31.9598 (Δ+0.0000)ms

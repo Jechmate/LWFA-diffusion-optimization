@@ -1,0 +1,76 @@
+2025-09-22 11:42:32 - Bayesian_Optimization_trial_1 - INFO - Starting optimization: Bayesian_Optimization
+2025-09-22 11:42:32 - Bayesian_Optimization_trial_1 - INFO - Trial number: 1
+2025-09-22 11:42:32 - Bayesian_Optimization_trial_1 - INFO - Log file: cosine_annealing_vs_bayesian_results/bayesian_trial_1/logs/Bayesian_Optimization_trial_1.log
+2025-09-22 11:42:32 - Bayesian_Optimization_trial_1 - INFO - ============================================================
+2025-09-22 11:42:32 - Bayesian_Optimization_trial_1 - INFO - BAYESIAN OPTIMIZATION INITIALIZATION
+2025-09-22 11:42:32 - Bayesian_Optimization_trial_1 - INFO - ============================================================
+2025-09-22 11:42:32 - Bayesian_Optimization_trial_1 - INFO - Function evaluations: 50
+2025-09-22 11:42:32 - Bayesian_Optimization_trial_1 - INFO - Initial evaluations: 1 (using specified starting point)
+2025-09-22 11:42:32 - Bayesian_Optimization_trial_1 - INFO - Initial point: [L:21.2362, P:29.0143, T:31.9598]
+2025-09-22 11:42:32 - Bayesian_Optimization_trial_1 - INFO - Parameter bounds:
+2025-09-22 11:42:32 - Bayesian_Optimization_trial_1 - INFO -   Laser energy: (10.0, 40.0)
+2025-09-22 11:42:32 - Bayesian_Optimization_trial_1 - INFO -   Pressure: (10.0, 30.0)
+2025-09-22 11:42:32 - Bayesian_Optimization_trial_1 - INFO -   Acquisition time: (10.0, 40.0)
+2025-09-22 11:42:32 - Bayesian_Optimization_trial_1 - INFO - Batch size: 16
+2025-09-22 11:42:32 - Bayesian_Optimization_trial_1 - INFO - ============================================================
+2025-09-22 11:42:32 - Bayesian_Optimization_trial_1 - INFO - STARTING BAYESIAN OPTIMIZATION
+2025-09-22 11:42:32 - Bayesian_Optimization_trial_1 - INFO - ============================================================
+2025-09-22 11:42:33 - Bayesian_Optimization_trial_1 - INFO - Eval   1: Params=[L:21.2362, P:29.0143, T:31.9598], WSum=1498.614624, Best=1498.614624, Time=0.61s
+2025-09-22 11:42:33 - Bayesian_Optimization_trial_1 - INFO - Eval   2: Params=[L:33.8963, P:13.6687, T:33.3907], WSum=357.782227, Best=1498.614624, Time=0.61s
+2025-09-22 11:42:34 - Bayesian_Optimization_trial_1 - INFO - Eval   3: Params=[L:22.4071, P:29.3611, T:31.4337], WSum=1813.962158, Best=1813.962158, Time=0.63s
+2025-09-22 11:42:35 - Bayesian_Optimization_trial_1 - INFO - Eval   4: Params=[L:35.3039, P:30.0000, T:27.0716], WSum=661.714172, Best=1813.962158, Time=0.63s
+2025-09-22 11:42:35 - Bayesian_Optimization_trial_1 - INFO - Eval   5: Params=[L:23.9629, P:28.1341, T:26.9079], WSum=2000.679199, Best=2000.679199, Time=0.63s
+2025-09-22 11:42:36 - Bayesian_Optimization_trial_1 - INFO - Eval   6: Params=[L:23.9877, P:10.0000, T:14.0983], WSum=261.180542, Best=2000.679199, Time=0.63s
+2025-09-22 11:42:37 - Bayesian_Optimization_trial_1 - INFO - Eval   7: Params=[L:25.0445, P:30.0000, T:25.2730], WSum=2066.900146, Best=2066.900146, Time=0.63s
+2025-09-22 11:42:38 - Bayesian_Optimization_trial_1 - INFO - Eval   8: Params=[L:10.0000, P:10.0000, T:40.0000], WSum=27.518393, Best=2066.900146, Time=0.62s
+2025-09-22 11:42:38 - Bayesian_Optimization_trial_1 - INFO - Eval   9: Params=[L:24.3732, P:30.0000, T:10.0000], WSum=962.290222, Best=2066.900146, Time=0.62s
+2025-09-22 11:42:39 - Bayesian_Optimization_trial_1 - INFO - Eval  10: Params=[L:25.6203, P:30.0000, T:33.1436], WSum=1869.259277, Best=2066.900146, Time=0.63s
+2025-09-22 11:42:40 - Bayesian_Optimization_trial_1 - INFO - Eval  11: Params=[L:40.0000, P:10.0000, T:10.0000], WSum=70.759048, Best=2066.900146, Time=0.63s
+2025-09-22 11:42:41 - Bayesian_Optimization_trial_1 - INFO - Eval  12: Params=[L:24.4329, P:30.0000, T:27.7677], WSum=1992.518433, Best=2066.900146, Time=0.63s
+2025-09-22 11:42:41 - Bayesian_Optimization_trial_1 - INFO - Eval  13: Params=[L:10.0000, P:30.0000, T:10.0000], WSum=337.510895, Best=2066.900146, Time=0.63s
+2025-09-22 11:42:42 - Bayesian_Optimization_trial_1 - INFO - Eval  14: Params=[L:26.0540, P:30.0000, T:26.2361], WSum=2035.329834, Best=2066.900146, Time=0.63s
+2025-09-22 11:42:43 - Bayesian_Optimization_trial_1 - INFO - Eval  15: Params=[L:25.0586, P:30.0000, T:26.8084], WSum=2155.434814, Best=2155.434814, Time=0.62s
+2025-09-22 11:42:44 - Bayesian_Optimization_trial_1 - INFO - Eval  16: Params=[L:24.0917, P:10.0000, T:40.0000], WSum=0.030157, Best=2155.434814, Time=0.63s
+2025-09-22 11:42:44 - Bayesian_Optimization_trial_1 - INFO - Eval  17: Params=[L:23.2408, P:30.0000, T:23.6894], WSum=1951.739380, Best=2155.434814, Time=0.64s
+2025-09-22 11:42:45 - Bayesian_Optimization_trial_1 - INFO - Eval  18: Params=[L:10.0000, P:10.0000, T:10.0000], WSum=61.826378, Best=2155.434814, Time=0.64s
+2025-09-22 11:42:46 - Bayesian_Optimization_trial_1 - INFO - Eval  19: Params=[L:40.0000, P:30.0000, T:40.0000], WSum=51.869129, Best=2155.434814, Time=0.63s
+2025-09-22 11:42:47 - Bayesian_Optimization_trial_1 - INFO - Eval  20: Params=[L:10.0000, P:30.0000, T:40.0000], WSum=105.850136, Best=2155.434814, Time=0.63s
+2025-09-22 11:42:48 - Bayesian_Optimization_trial_1 - INFO - Eval  21: Params=[L:26.6091, P:30.0000, T:23.9012], WSum=2298.990479, Best=2298.990479, Time=0.63s
+2025-09-22 11:42:48 - Bayesian_Optimization_trial_1 - INFO - Eval  22: Params=[L:27.8511, P:30.0000, T:21.7570], WSum=2369.302246, Best=2369.302246, Time=0.62s
+2025-09-22 11:42:49 - Bayesian_Optimization_trial_1 - INFO - Eval  23: Params=[L:28.7768, P:30.0000, T:19.3739], WSum=1543.165527, Best=2369.302246, Time=0.62s
+2025-09-22 11:42:50 - Bayesian_Optimization_trial_1 - INFO - Eval  24: Params=[L:27.6927, P:30.0000, T:27.6161], WSum=2115.664551, Best=2369.302246, Time=0.62s
+2025-09-22 11:42:50 - Bayesian_Optimization_trial_1 - INFO - Eval  25: Params=[L:28.3988, P:30.0000, T:40.0000], WSum=1422.103516, Best=2369.302246, Time=0.63s
+2025-09-22 11:42:51 - Bayesian_Optimization_trial_1 - INFO - Eval  26: Params=[L:27.5327, P:30.0000, T:27.2888], WSum=2041.091064, Best=2369.302246, Time=0.63s
+2025-09-22 11:42:52 - Bayesian_Optimization_trial_1 - INFO - Eval  27: Params=[L:26.7056, P:24.6711, T:25.2071], WSum=904.916931, Best=2369.302246, Time=0.63s
+2025-09-22 11:42:53 - Bayesian_Optimization_trial_1 - INFO - Eval  28: Params=[L:10.0000, P:20.3218, T:10.0000], WSum=159.735031, Best=2369.302246, Time=0.63s
+2025-09-22 11:42:53 - Bayesian_Optimization_trial_1 - INFO - Eval  29: Params=[L:40.0000, P:10.0000, T:40.0000], WSum=57.857658, Best=2369.302246, Time=0.63s
+2025-09-22 11:42:54 - Bayesian_Optimization_trial_1 - INFO - Eval  30: Params=[L:40.0000, P:22.2753, T:10.0000], WSum=167.074463, Best=2369.302246, Time=0.63s
+2025-09-22 11:42:55 - Bayesian_Optimization_trial_1 - INFO - Eval  31: Params=[L:19.7415, P:21.6901, T:40.0000], WSum=598.780640, Best=2369.302246, Time=0.63s
+2025-09-22 11:42:56 - Bayesian_Optimization_trial_1 - INFO - Eval  32: Params=[L:40.0000, P:30.0000, T:10.0000], WSum=106.940651, Best=2369.302246, Time=0.62s
+2025-09-22 11:42:56 - Bayesian_Optimization_trial_1 - INFO - Eval  33: Params=[L:25.4365, P:30.0000, T:23.1631], WSum=2214.670410, Best=2369.302246, Time=0.63s
+2025-09-22 11:42:57 - Bayesian_Optimization_trial_1 - INFO - Eval  34: Params=[L:22.4480, P:30.0000, T:40.0000], WSum=1355.593628, Best=2369.302246, Time=0.63s
+2025-09-22 11:42:58 - Bayesian_Optimization_trial_1 - INFO - Eval  35: Params=[L:40.0000, P:20.0593, T:40.0000], WSum=99.198067, Best=2369.302246, Time=0.63s
+2025-09-22 11:42:59 - Bayesian_Optimization_trial_1 - INFO - Eval  36: Params=[L:20.1036, P:30.0000, T:21.6779], WSum=1755.014893, Best=2369.302246, Time=0.63s
+2025-09-22 11:43:00 - Bayesian_Optimization_trial_1 - INFO - Eval  37: Params=[L:25.0112, P:30.0000, T:22.8153], WSum=2041.260742, Best=2369.302246, Time=0.63s
+2025-09-22 11:43:00 - Bayesian_Optimization_trial_1 - INFO - Eval  38: Params=[L:26.8277, P:30.0000, T:27.5595], WSum=2029.700195, Best=2369.302246, Time=0.63s
+2025-09-22 11:43:01 - Bayesian_Optimization_trial_1 - INFO - Eval  39: Params=[L:21.6859, P:20.6805, T:10.0000], WSum=479.244659, Best=2369.302246, Time=0.63s
+2025-09-22 11:43:02 - Bayesian_Optimization_trial_1 - INFO - Eval  40: Params=[L:24.7185, P:30.0000, T:22.4287], WSum=2183.564941, Best=2369.302246, Time=0.62s
+2025-09-22 11:43:03 - Bayesian_Optimization_trial_1 - INFO - Eval  41: Params=[L:24.8035, P:30.0000, T:22.3437], WSum=2197.249268, Best=2369.302246, Time=0.62s
+2025-09-22 11:43:04 - Bayesian_Optimization_trial_1 - INFO - Eval  42: Params=[L:24.9172, P:30.0000, T:22.2452], WSum=2099.121582, Best=2369.302246, Time=0.65s
+2025-09-22 11:43:04 - Bayesian_Optimization_trial_1 - INFO - Eval  43: Params=[L:10.0844, P:21.4032, T:28.0676], WSum=181.154785, Best=2369.302246, Time=0.63s
+2025-09-22 11:43:05 - Bayesian_Optimization_trial_1 - INFO - Eval  44: Params=[L:26.7570, P:30.0000, T:27.7837], WSum=2006.718384, Best=2369.302246, Time=0.63s
+2025-09-22 11:43:06 - Bayesian_Optimization_trial_1 - INFO - Eval  45: Params=[L:25.3120, P:30.0000, T:21.6349], WSum=2256.683350, Best=2369.302246, Time=0.63s
+2025-09-22 11:43:07 - Bayesian_Optimization_trial_1 - INFO - Eval  46: Params=[L:24.2014, P:30.0000, T:25.4571], WSum=1979.190552, Best=2369.302246, Time=0.62s
+2025-09-22 11:43:07 - Bayesian_Optimization_trial_1 - INFO - Eval  47: Params=[L:17.0639, P:29.8668, T:25.2477], WSum=942.840271, Best=2369.302246, Time=0.63s
+2025-09-22 11:43:08 - Bayesian_Optimization_trial_1 - INFO - Eval  48: Params=[L:29.3987, P:22.5592, T:39.7578], WSum=941.839905, Best=2369.302246, Time=0.63s
+2025-09-22 11:43:09 - Bayesian_Optimization_trial_1 - INFO - Eval  49: Params=[L:26.2733, P:30.0000, T:22.4962], WSum=2265.887207, Best=2369.302246, Time=0.62s
+2025-09-22 11:43:10 - Bayesian_Optimization_trial_1 - INFO - Eval  50: Params=[L:31.3496, P:10.6189, T:10.1811], WSum=379.494873, Best=2369.302246, Time=0.63s
+2025-09-22 11:43:10 - Bayesian_Optimization_trial_1 - INFO - ============================================================
+2025-09-22 11:43:10 - Bayesian_Optimization_trial_1 - INFO - BAYESIAN OPTIMIZATION COMPLETED
+2025-09-22 11:43:10 - Bayesian_Optimization_trial_1 - INFO - ============================================================
+2025-09-22 11:43:10 - Bayesian_Optimization_trial_1 - INFO - Total optimization time: 37.85s
+2025-09-22 11:43:10 - Bayesian_Optimization_trial_1 - INFO - Best parameters found:
+2025-09-22 11:43:10 - Bayesian_Optimization_trial_1 - INFO -   Laser energy: 27.8511
+2025-09-22 11:43:10 - Bayesian_Optimization_trial_1 - INFO -   Pressure: 30.0000
+2025-09-22 11:43:10 - Bayesian_Optimization_trial_1 - INFO -   Acquisition time: 21.7570
+2025-09-22 11:43:10 - Bayesian_Optimization_trial_1 - INFO - Best weighted sum: 2369.302246
