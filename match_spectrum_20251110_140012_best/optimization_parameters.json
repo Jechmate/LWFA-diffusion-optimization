@@ -1,0 +1,33 @@
+{
+    "model_path": "models/edm_4kepochs/ema_ckpt_final.pt",
+    "device": "cuda:3",
+    "target_spectrum_csv": "avg_spectrum_45_25_20.csv",
+    "pressure_bounds": [
+        1.0,
+        50.0
+    ],
+    "laser_energy_bounds": [
+        5.0,
+        50.0
+    ],
+    "acquisition_time_bounds": [
+        5.0,
+        100.0
+    ],
+    "bayesian_n_calls": 100,
+    "bayesian_n_initial_points": 10,
+    "finetune_max_iter": 50,
+    "finetune_lr": 2.0,
+    "finetune_optimizer": "lbfgs",
+    "batch_size": 16,
+    "num_sampling_steps": 18,
+    "sigma_min": 0.002,
+    "sigma_max": 80,
+    "rho": 7,
+    "cfg_scale": 3.0,
+    "smooth_output": true,
+    "smooth_kernel_size": 9,
+    "smooth_sigma": 2.0,
+    "normalize_spectrum": false,
+    "seed": null
+}
