@@ -1,0 +1,10 @@
+*.png
+match_spectrum_*
+comparison_*
+cosine_annealing_*
+hybrid_optimization_*
+multi_seed_*
+plots*
+avg_spectrum*
+spectrum_target*
+__pycache__*
