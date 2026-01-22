@@ -41,7 +41,7 @@ import logging
 
 # Import necessary modules from the project
 from src.modules_1d import EDMPrecond
-from src.diffusion import EdmSampler, transform_vector, gaussian_smooth_1d
+from src.diffusion import DifferentiableEdmSampler, transform_vector, gaussian_smooth_1d
 from src.utils import deflection_biexp_calc
 
 def set_seed(seed=42):
@@ -115,89 +115,6 @@ def create_energy_axis(length=256, electron_pointing_pixel=62):
         ])
     return energy_axis
 
-class DifferentiableEdmSampler(EdmSampler):
-    """Differentiable version of EDM sampler that allows gradients to flow through the sampling process."""
-    
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.stored_latents = None
-        self.latents_device = None
-        self.latents_shape = None
-    
-    def initialize_latents(self, n_samples, resolution, device):
-        """Initialize latents once for deterministic sampling."""
-        self.latents_shape = (n_samples, 1, resolution)
-        self.latents_device = device
-        self.stored_latents = self.randn_like(torch.empty(self.latents_shape, device=device))
-        print(f"Initialized deterministic latents with shape {self.latents_shape} on {device}")
-    
-    def sample_differentiable(self, resolution, device, settings=None, n_samples=1, cfg_scale=3, 
-                             settings_dim=0, smooth_output=False, smooth_kernel_size=5, smooth_sigma=1.0):
-        """Differentiable version of the sample method that preserves gradients."""
-        # Use stored deterministic latents if available
-        if (self.stored_latents is not None and 
-            self.latents_shape == (n_samples, 1, resolution) and 
-            self.latents_device == device):
-            latents = self.stored_latents
-        else:
-            latents = self.randn_like(torch.empty((n_samples, 1, resolution), device=device))
-            print(f"Warning: Creating new latents - algorithm may not be fully deterministic")
-
-        sigma_min = self.sigma_min
-        sigma_max = self.sigma_max
-
-        # Time step discretization
-        step_indices = torch.arange(self.num_steps, dtype=torch.float32, device=device)
-        t_steps = (
-            sigma_max ** (1 / self.rho)
-            + step_indices / (self.num_steps - 1) * (sigma_min ** (1 / self.rho) - sigma_max ** (1 / self.rho))
-        ) ** self.rho
-        t_steps = torch.cat([self.round_sigma(t_steps), torch.zeros_like(t_steps[:1])])
-
-        # Main sampling loop
-        x_next = latents.to(torch.float32) * t_steps[0]
-       
-        for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])):
-            x_cur = x_next
-            
-            # Increase noise temporarily
-            gamma = min(self.S_churn / self.num_steps, np.sqrt(2) - 1) if self.S_min <= t_cur <= self.S_max else 0
-            t_hat = self.round_sigma(t_cur + gamma * t_cur)
-            x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt() * self.S_noise * self.randn_like(x_cur)
-
-            # Euler step
-            if cfg_scale == -1:
-                denoised = self.net(x_hat, t_hat, settings).to(torch.float32)
-            elif settings_dim != 0: 
-                denoised_uncond = self.net(x_hat, t_hat, None).to(torch.float32)
-                denoised_cond = self.net(x_hat, t_hat, settings).to(torch.float32)
-                denoised = denoised_uncond + cfg_scale * (denoised_cond - denoised_uncond) 
-            else:
-                denoised_uncond = self.net(x_hat, t_hat, None).to(torch.float32)
-                denoised = denoised_uncond
-
-            d_cur = (x_hat - denoised) / t_hat
-            x_next = x_hat + (t_next - t_hat) * d_cur
-        
-            # Apply 2nd order correction
-            if i < self.num_steps - 1:
-                if cfg_scale == -1:
-                    denoised = self.net(x_next, t_next, settings).to(torch.float32)
-                elif settings_dim != 0: 
-                    denoised_uncond = self.net(x_next, t_next, None).to(torch.float32)
-                    denoised_cond = self.net(x_next, t_next, settings).to(torch.float32)
-                    denoised = denoised_uncond + cfg_scale * (denoised_cond - denoised_uncond)
-                else:
-                    denoised_uncond = self.net(x_next, t_next, None).to(torch.float32)
-                    denoised = denoised_uncond
-                    
-                d_prime = (x_next - denoised) / t_next
-                x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
-    
-        x_next = transform_vector(x_next)
-        if smooth_output:
-            x_next = gaussian_smooth_1d(x_next, kernel_size=smooth_kernel_size, sigma=smooth_sigma)
-        return x_next
 
 class SpectrumMatchingOptimizer:
     """
