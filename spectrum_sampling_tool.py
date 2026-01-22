@@ -16,7 +16,7 @@ warnings.filterwarnings('ignore')
 
 # Import your modules (adjust paths as needed)
 from src.modules_1d import EDMPrecond
-from src.diffusion import EdmSampler, transform_vector, gaussian_smooth_1d
+from src.diffusion import EdmSampler, DifferentiableEdmSampler, transform_vector, gaussian_smooth_1d
 from src.utils import deflection_biexp_calc
 
 class SpectrumSamplingTool:
@@ -68,6 +68,10 @@ class SpectrumSamplingTool:
             sigma_max=80,
             rho=7
         )
+        
+        # Initialize differentiable sampler (lazy initialization)
+        self.diff_sampler = None
+        self._diff_sampler_initialized = False
         
         # Create energy axis
         self.energy_axis = self._create_energy_axis()
@@ -237,6 +241,12 @@ class SpectrumSamplingTool:
             icon='download'
         )
         
+        self.save_avg_spectrum_button = widgets.Button(
+            description='Save Avg Spectrum',
+            button_style='success',
+            icon='save'
+        )
+        
         # Output widget for plots
         self.output_widget = widgets.Output()
         
@@ -245,6 +255,7 @@ class SpectrumSamplingTool:
         self.add_to_history_button.on_click(self._on_add_to_history_click)
         self.clear_history_button.on_click(self._on_clear_history_click)
         self.export_button.on_click(self._on_export_click)
+        self.save_avg_spectrum_button.on_click(self._on_save_avg_spectrum_click)
     
     def _get_current_parameters(self) -> Dict[str, float]:
         """Get current parameter values from sliders."""
@@ -284,6 +295,223 @@ class SpectrumSamplingTool:
                 samples_np = samples_np[:, 0, :]  # Take first channel
             
             return samples_np
+    
+    def _initialize_differentiable_sampler(
+        self, 
+        n_samples: int = 4, 
+        seed: Optional[int] = None,
+        sigma_min: float = 0.002,
+        sigma_max: float = 80,
+        rho: float = 7
+    ):
+        """
+        Initialize the differentiable sampler with deterministic latents.
+        
+        Args:
+            n_samples: Number of samples the sampler will generate
+            seed: Random seed for reproducible latent initialization
+            sigma_min: Minimum sigma value for sampling
+            sigma_max: Maximum sigma value for sampling  
+            rho: Rho parameter for time step discretization
+        """
+        self.diff_sampler = DifferentiableEdmSampler(
+            net=self.model,
+            num_steps=self.num_sampling_steps,
+            sigma_min=sigma_min,
+            sigma_max=sigma_max,
+            rho=rho
+        )
+        
+        self.diff_sampler.initialize_latents(
+            n_samples=n_samples,
+            resolution=self.spectrum_length,
+            device=self.device,
+            seed=seed
+        )
+        
+        self._diff_sampler_initialized = True
+        self._diff_sampler_n_samples = n_samples
+        self._diff_sampler_seed = seed
+        
+        print(f"✅ Differentiable sampler initialized with {n_samples} samples, seed={seed}")
+    
+    def _generate_spectra_differentiable(
+        self, 
+        parameters: Dict[str, float], 
+        n_samples: int, 
+        cfg_scale: float,
+        smooth_output: bool = True,
+        smooth_sigma: float = 2.0,
+        smooth_kernel_size: int = 9,
+        seed: Optional[int] = None,
+        return_tensor: bool = False,
+        sigma_min: float = 0.002,
+        sigma_max: float = 80,
+        rho: float = 7
+    ):
+        """
+        Generate spectra using the differentiable sampler approach.
+        
+        This method preserves gradients through the sampling process, enabling:
+        - Gradient-based optimization on conditioning parameters
+        - Reproducible sampling with fixed latents
+        - Backpropagation through the generation process
+        
+        Args:
+            parameters: Dictionary of conditioning parameters (e.g., {"E": 20.0, "P": 15.0, "ms": 30.0})
+            n_samples: Number of samples to generate
+            cfg_scale: Classifier-free guidance scale
+            smooth_output: Whether to apply Gaussian smoothing to output
+            smooth_sigma: Sigma for Gaussian smoothing
+            smooth_kernel_size: Kernel size for smoothing
+            seed: Random seed for reproducible latent initialization
+            return_tensor: If True, return torch.Tensor instead of numpy array
+            sigma_min: Minimum sigma value for sampling
+            sigma_max: Maximum sigma value for sampling
+            rho: Rho parameter for time step discretization
+            
+        Returns:
+            Generated spectra as numpy array (n_samples, spectrum_length) or torch.Tensor
+            if return_tensor=True
+        """
+        # Initialize or reinitialize differentiable sampler if needed
+        needs_reinit = (
+            not self._diff_sampler_initialized or
+            self._diff_sampler_n_samples != n_samples or
+            self._diff_sampler_seed != seed
+        )
+        
+        if needs_reinit:
+            self._initialize_differentiable_sampler(
+                n_samples=n_samples, 
+                seed=seed,
+                sigma_min=sigma_min,
+                sigma_max=sigma_max,
+                rho=rho
+            )
+        
+        # Create settings tensor with gradient tracking
+        settings_values = [parameters[feature] for feature in self.features]
+        settings_tensor = torch.tensor(
+            settings_values, 
+            dtype=torch.float32, 
+            device=self.device,
+            requires_grad=True
+        ).unsqueeze(0)
+        
+        # Generate samples using differentiable sampler
+        samples = self.diff_sampler.sample_differentiable(
+            resolution=self.spectrum_length,
+            device=self.device,
+            settings=settings_tensor,
+            n_samples=n_samples,
+            cfg_scale=cfg_scale,
+            settings_dim=len(self.features),
+            smooth_output=smooth_output,
+            smooth_kernel_size=smooth_kernel_size,
+            smooth_sigma=smooth_sigma,
+            use_stored_latents=True
+        )
+        
+        if return_tensor:
+            # Return tensor for gradient-based optimization
+            if samples.ndim == 3:
+                return samples.squeeze(1)  # (n_samples, spectrum_length)
+            return samples
+        
+        # Convert to numpy for visualization
+        with torch.no_grad():
+            samples_np = samples.cpu().numpy()
+            if samples_np.ndim == 3:
+                samples_np = samples_np[:, 0, :]
+            
+            return samples_np
+    
+    def generate_with_gradients(
+        self,
+        parameters: Dict[str, float],
+        n_samples: int = 4,
+        cfg_scale: float = 3.0,
+        smooth_output: bool = True,
+        smooth_sigma: float = 2.0,
+        smooth_kernel_size: int = 9,
+        seed: Optional[int] = None,
+        sigma_min: float = 0.002,
+        sigma_max: float = 80,
+        rho: float = 7
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Generate spectra and return both samples and conditioning tensor for gradient computation.
+        
+        This is the main entry point for gradient-based optimization workflows.
+        
+        Args:
+            parameters: Dictionary of conditioning parameters
+            n_samples: Number of samples to generate  
+            cfg_scale: Classifier-free guidance scale
+            smooth_output: Whether to apply Gaussian smoothing
+            smooth_sigma: Sigma for Gaussian smoothing
+            smooth_kernel_size: Kernel size for smoothing
+            seed: Random seed for reproducible latents
+            sigma_min: Minimum sigma value
+            sigma_max: Maximum sigma value
+            rho: Rho parameter
+            
+        Returns:
+            Tuple of (samples_tensor, settings_tensor) where:
+            - samples_tensor: Generated spectra (n_samples, spectrum_length)
+            - settings_tensor: Conditioning tensor with requires_grad=True (1, n_features)
+            
+        Example:
+            >>> samples, settings = tool.generate_with_gradients({"E": 20, "P": 15, "ms": 30})
+            >>> loss = some_loss_function(samples, target)
+            >>> loss.backward()  # Gradients flow to settings
+            >>> print(settings.grad)  # Gradient w.r.t. conditioning parameters
+        """
+        # Initialize differentiable sampler if needed
+        needs_reinit = (
+            not self._diff_sampler_initialized or
+            self._diff_sampler_n_samples != n_samples or
+            self._diff_sampler_seed != seed
+        )
+        
+        if needs_reinit:
+            self._initialize_differentiable_sampler(
+                n_samples=n_samples,
+                seed=seed,
+                sigma_min=sigma_min,
+                sigma_max=sigma_max,
+                rho=rho
+            )
+        
+        # Create settings tensor with gradient tracking
+        settings_values = [parameters[feature] for feature in self.features]
+        settings_tensor = torch.tensor(
+            settings_values,
+            dtype=torch.float32,
+            device=self.device,
+            requires_grad=True
+        ).unsqueeze(0)
+        
+        # Generate samples
+        samples = self.diff_sampler.sample_differentiable(
+            resolution=self.spectrum_length,
+            device=self.device,
+            settings=settings_tensor,
+            n_samples=n_samples,
+            cfg_scale=cfg_scale,
+            settings_dim=len(self.features),
+            smooth_output=smooth_output,
+            smooth_kernel_size=smooth_kernel_size,
+            smooth_sigma=smooth_sigma,
+            use_stored_latents=True
+        )
+        
+        # Squeeze channel dimension
+        if samples.ndim == 3:
+            samples = samples.squeeze(1)
+        
+        return samples, settings_tensor
     
     def _plot_spectra(self, samples: np.ndarray, parameters: Dict[str, float], show_individual: bool = True):
         """Plot generated spectra."""
@@ -484,6 +712,38 @@ class SpectrumSamplingTool:
         except Exception as e:
             print(f"❌ Error exporting data: {e}")
     
+    def _on_save_avg_spectrum_click(self, button):
+        """Handle save average spectrum button click."""
+        if self.current_samples is None:
+            print("❌ No current samples to save. Generate spectra first.")
+            return
+        
+        try:
+            # Get current parameters
+            parameters = self.current_samples['parameters']
+            samples = self.current_samples['samples']
+            
+            # Calculate average spectrum
+            avg_spectrum = np.mean(samples, axis=0)
+            
+            # Create filename with parameter values
+            E = parameters.get('E', 0)
+            P = parameters.get('P', 0)
+            ms = parameters.get('ms', 0)
+            filename = f"avg_spectrum_{E:.1f}_{P:.1f}_{ms:.1f}.csv"
+            
+            # Save as CSV with energy and intensity columns
+            df = pd.DataFrame({
+                'energy_MeV': self.energy_axis,
+                'intensity': avg_spectrum
+            })
+            df.to_csv(filename, index=False)
+            
+            print(f"✅ Average spectrum saved to: {filename}")
+            
+        except Exception as e:
+            print(f"❌ Error saving average spectrum: {e}")
+    
     def _export_sample_set(self, sample_set: Dict[str, Any], output_dir: Path):
         """Export a single sample set."""
         output_dir.mkdir(exist_ok=True)
@@ -579,6 +839,7 @@ class SpectrumSamplingTool:
         control_box = widgets.VBox([
             widgets.HTML("<h3>🎮 Controls</h3>"),
             self.generate_button,
+            self.save_avg_spectrum_button,
             widgets.HBox([
                 self.add_to_history_button,
                 self.clear_history_button
@@ -624,8 +885,9 @@ class SpectrumSamplingTool:
             print("1. 🎛️ Adjust the conditional parameters using the sliders")
             print("2. ⚙️ Configure sampling parameters (number of samples, CFG scale, etc.)")
             print("3. 🎮 Click 'Generate Spectra' to create new samples")
-            print("4. 📚 Use 'Add to History' to keep track of interesting parameter sets")
-            print("5. 💾 Use 'Export Data' to save your results")
+            print("4. 💾 Click 'Save Avg Spectrum' to save the average spectrum as CSV")
+            print("5. 📚 Use 'Add to History' to keep track of interesting parameter sets")
+            print("6. 💾 Use 'Export Data' to save all results")
             print()
             print("Ready to generate spectra! 🚀")
     
@@ -775,6 +1037,9 @@ def quick_sample_and_plot(
     parameters: Dict[str, float],
     n_samples: int = 4,
     device: str = "auto",
+    cfg_scale = 3.0,
+    save_path = "avg_spectrum.csv",
+    visualize = True,
     **kwargs
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -797,12 +1062,194 @@ def quick_sample_and_plot(
     tool = SpectrumSamplingTool(model_path, device=device, **kwargs)
     
     # Generate samples
-    samples = tool._generate_spectra(parameters, n_samples, cfg_scale=3.0)
+    samples = tool._generate_spectra(parameters, n_samples, cfg_scale=cfg_scale)
+    avg_spectrum = np.mean(samples, axis=0)
+    
+    # Save average spectrum with energy and intensity columns
+    spectrum_data = np.column_stack((tool.energy_axis, avg_spectrum))
+    np.savetxt(save_path, spectrum_data, delimiter=',', header='energy_MeV,intensity', comments='')
+
     
     # Plot results
-    tool._plot_spectra(samples, parameters)
+    if visualize:
+        tool._plot_spectra(samples, parameters)
     
     return samples, tool.energy_axis
+
+
+def quick_sample_differentiable(
+    model_path: str,
+    parameters: Dict[str, float],
+    n_samples: int = 4,
+    device: str = "auto",
+    cfg_scale: float = 3.0,
+    smooth_output: bool = True,
+    smooth_sigma: float = 2.0,
+    smooth_kernel_size: int = 9,
+    seed: Optional[int] = None,
+    return_tensor: bool = False,
+    visualize: bool = True,
+    save_path: Optional[str] = None,
+    sigma_min: float = 0.002,
+    sigma_max: float = 80,
+    rho: float = 7,
+    **kwargs
+) -> Tuple[Any, np.ndarray]:
+    """
+    Quick function to generate spectra using the differentiable approach.
+    
+    This uses the DifferentiableEdmSampler which:
+    - Preserves gradients through the sampling process
+    - Supports deterministic sampling with fixed latents
+    - Enables gradient-based optimization on conditioning parameters
+    
+    Args:
+        model_path: Path to the trained model
+        parameters: Dictionary of parameters (e.g., {"E": 20.0, "P": 15.0, "ms": 30.0})
+        n_samples: Number of samples to generate
+        device: Device to use ("auto", "cuda", or "cpu")
+        cfg_scale: Classifier-free guidance scale
+        smooth_output: Whether to apply Gaussian smoothing
+        smooth_sigma: Sigma for Gaussian smoothing
+        smooth_kernel_size: Kernel size for smoothing
+        seed: Random seed for reproducible latents
+        return_tensor: If True, return torch.Tensor instead of numpy array
+        visualize: Whether to plot the results
+        save_path: If provided, save average spectrum to this path
+        sigma_min: Minimum sigma value for sampling
+        sigma_max: Maximum sigma value for sampling
+        rho: Rho parameter for time step discretization
+        **kwargs: Additional arguments for SpectrumSamplingTool
+    
+    Returns:
+        Tuple of (samples, energy_axis) where samples is numpy array or tensor
+        
+    Example:
+        >>> samples, energy = quick_sample_differentiable(
+        ...     "models/edm_4kepochs/ema_ckpt_final.pt",
+        ...     {"E": 20.0, "P": 15.0, "ms": 30.0},
+        ...     n_samples=8,
+        ...     seed=42
+        ... )
+    """
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    # Create tool
+    tool = SpectrumSamplingTool(model_path, device=device, **kwargs)
+    
+    # Generate samples using differentiable approach
+    samples = tool._generate_spectra_differentiable(
+        parameters=parameters,
+        n_samples=n_samples,
+        cfg_scale=cfg_scale,
+        smooth_output=smooth_output,
+        smooth_sigma=smooth_sigma,
+        smooth_kernel_size=smooth_kernel_size,
+        seed=seed,
+        return_tensor=return_tensor,
+        sigma_min=sigma_min,
+        sigma_max=sigma_max,
+        rho=rho
+    )
+    
+    # Save average spectrum if requested
+    if save_path is not None:
+        if return_tensor:
+            avg_spectrum = samples.mean(dim=0).detach().cpu().numpy()
+        else:
+            avg_spectrum = np.mean(samples, axis=0)
+        
+        spectrum_data = np.column_stack((tool.energy_axis, avg_spectrum))
+        np.savetxt(save_path, spectrum_data, delimiter=',', header='energy_MeV,intensity', comments='')
+        print(f"✅ Average spectrum saved to: {save_path}")
+    
+    # Plot results
+    if visualize:
+        if return_tensor:
+            samples_np = samples.detach().cpu().numpy()
+        else:
+            samples_np = samples
+        tool._plot_spectra(samples_np, parameters)
+    
+    return samples, tool.energy_axis
+
+
+def generate_with_gradients(
+    model_path: str,
+    parameters: Dict[str, float],
+    n_samples: int = 4,
+    device: str = "auto",
+    cfg_scale: float = 3.0,
+    smooth_output: bool = True,
+    smooth_sigma: float = 2.0,
+    smooth_kernel_size: int = 9,
+    seed: Optional[int] = None,
+    sigma_min: float = 0.002,
+    sigma_max: float = 80,
+    rho: float = 7,
+    **kwargs
+) -> Tuple[torch.Tensor, torch.Tensor, 'SpectrumSamplingTool']:
+    """
+    Generate spectra with gradient support for optimization workflows.
+    
+    This is the main entry point for using the differentiable sampler in optimization.
+    Returns tensors with gradient tracking enabled.
+    
+    Args:
+        model_path: Path to the trained model
+        parameters: Dictionary of parameters (e.g., {"E": 20.0, "P": 15.0, "ms": 30.0})
+        n_samples: Number of samples to generate
+        device: Device to use ("auto", "cuda", or "cpu")
+        cfg_scale: Classifier-free guidance scale
+        smooth_output: Whether to apply Gaussian smoothing
+        smooth_sigma: Sigma for Gaussian smoothing
+        smooth_kernel_size: Kernel size for smoothing
+        seed: Random seed for reproducible latents
+        sigma_min: Minimum sigma value for sampling
+        sigma_max: Maximum sigma value for sampling
+        rho: Rho parameter for time step discretization
+        **kwargs: Additional arguments for SpectrumSamplingTool
+    
+    Returns:
+        Tuple of (samples, settings_tensor, tool) where:
+        - samples: Generated spectra tensor (n_samples, spectrum_length)
+        - settings_tensor: Conditioning tensor with requires_grad=True (1, n_features)
+        - tool: The SpectrumSamplingTool instance for further use
+        
+    Example:
+        >>> samples, settings, tool = generate_with_gradients(
+        ...     "models/edm_4kepochs/ema_ckpt_final.pt",
+        ...     {"E": 20.0, "P": 15.0, "ms": 30.0},
+        ...     seed=42
+        ... )
+        >>> # Compute loss and backpropagate
+        >>> loss = ((samples.mean(dim=0) - target) ** 2).mean()
+        >>> loss.backward()
+        >>> print(f"Gradients: {settings.grad}")
+    """
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    # Create tool
+    tool = SpectrumSamplingTool(model_path, device=device, **kwargs)
+    
+    # Generate samples with gradient tracking
+    samples, settings_tensor = tool.generate_with_gradients(
+        parameters=parameters,
+        n_samples=n_samples,
+        cfg_scale=cfg_scale,
+        smooth_output=smooth_output,
+        smooth_sigma=smooth_sigma,
+        smooth_kernel_size=smooth_kernel_size,
+        seed=seed,
+        sigma_min=sigma_min,
+        sigma_max=sigma_max,
+        rho=rho
+    )
+    
+    return samples, settings_tensor, tool
+
 
 # Example usage functions
 def create_parameter_sweep(
