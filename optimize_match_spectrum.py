@@ -1,36 +1,50 @@
 """
 Spectrum Matching Optimization for LWFA
 
-Supports multiple optimization modes:
-- Multi-seed optimization with a single approach
-- Comparison test across 7 approaches with 10 seeds each
-- Extend existing comparison with additional approaches
+Everything that used to be hardcoded here (model, target spectrum, bounds,
+sampler settings, seeds and the optimization approaches themselves) now lives in
+a config file - see configs/match_spectrum.yaml. Command line flags override
+the config; a config only needs to list the keys it changes.
 
 USAGE:
 ------
-# Run comparison test (7 approaches × 10 seeds)
-python optimize_match_spectrum.py --mode comparison
+# Run with the default config (configs/match_spectrum.yaml)
+python optimize_match_spectrum.py
 
-# Extend existing comparison with new approaches
+# Run with a custom config
+python optimize_match_spectrum.py --config configs/my_experiment.yaml
+
+# Override config values from the command line
+python optimize_match_spectrum.py --mode multi --approach bayes_adam --seeds 351
+
+# Extend an existing comparison with new approaches
 python optimize_match_spectrum.py --mode extend --output comparison_20260114_110450 --approaches adam_lbfgs bayes_adam_lbfgs
 
-# Run multi-seed with specific approach
-python optimize_match_spectrum.py --mode multi --approach bayes_adam --seeds 351
+MODES:
+------
+comparison - run every configured approach across `run.comparison_seeds`
+multi      - run a single approach across `run.n_seeds` random seeds
+extend     - add approaches to an existing comparison directory
 
 APPROACHES:
 -----------
-1) bayesian_only   - Bayesian optimization (100 steps)
-2) adam_only       - Adam from random start (100 steps)
-3) lbfgs_only      - LBFGS from random start (100 steps)
-4) bayes_adam      - Bayesian (100) + Adam (50)
-5) bayes_lbfgs     - Bayesian (100) + LBFGS (50)
-6) adam_lbfgs      - Adam (50) + LBFGS (50)
+Defined in the config under `approaches` as a list of stages. The first stage
+starts from random parameters, each later stage starts from the best parameters
+so far, and the best stage overall is reported. Defaults ship with:
+
+1) bayesian_only    - Bayesian optimization (100 calls)
+2) adam_only        - Adam from random start (100 steps)
+3) lbfgs_only       - LBFGS from random start (100 steps)
+4) bayes_adam       - Bayesian (100) + Adam (50)
+5) bayes_lbfgs      - Bayesian (100) + LBFGS (50)
+6) adam_lbfgs       - Adam (50) + LBFGS (50)
 7) bayes_adam_lbfgs - Bayesian (100) + Adam (50) + LBFGS (50)
 8) bayes_lbfgs_adam - Bayesian (100) + LBFGS (50) + Adam (50)
-9) bayes_sgd       - Bayesian (100) + SGD (50)
+9) bayes_sgd        - Bayesian (100) + SGD (50)
 """
 
 import os
+import copy
 import argparse
 import torch
 import torch.optim as optim
@@ -41,6 +55,7 @@ from skopt import gp_minimize
 from skopt.space import Real
 import pandas as pd
 import json
+import yaml
 from datetime import datetime
 import logging
 from schedulefree import RAdamScheduleFree
@@ -48,6 +63,138 @@ from schedulefree import RAdamScheduleFree
 from src.modules_1d import EDMPrecond
 from src.diffusion import DifferentiableEdmSampler
 from src.utils import deflection_biexp_calc
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+DEFAULT_CONFIG_PATH = "configs/match_spectrum.yaml"
+
+# Built-in defaults. A config file is deep-merged on top of this, so it only has
+# to specify the keys it wants to change. Keep in sync with the shipped YAML.
+DEFAULT_CONFIG = {
+    'model_path': "models/edm_4kepochs/ema_ckpt_final.pt",
+    'target_spectrum_csv': "avg_spectrum_45_25_20.csv",
+    'device': "cuda:1",
+    'run': {
+        'mode': 'comparison',
+        'output': None,
+        'approach': 'bayes_adam',
+        'approaches': None,
+        'n_seeds': 10,
+        'multi_seed_base': 42,
+        'comparison_seeds': [67, 156, 236, 391, 429, 504, 742, 782, 823, 918],
+    },
+    'optimizer': {
+        'laser_energy_bounds': [5.0, 50.0],
+        'pressure_bounds': [1.0, 50.0],
+        'acquisition_time_bounds': [5.0, 100.0],
+        'batch_size': 16,
+        'spectrum_length': 256,
+        'features': ["E", "P", "ms"],
+        'num_sampling_steps': 18,
+        'sigma_min': 0.002,
+        'sigma_max': 80,
+        'rho': 7,
+        'cfg_scale': 3.0,
+        'smooth_output': True,
+        'smooth_kernel_size': 9,
+        'smooth_sigma': 2.0,
+        'normalize_spectrum': False,
+    },
+    'approaches': {
+        'bayesian_only': {'label': 'Bayesian Only', 'stages': [
+            {'method': 'bayesian', 'n_calls': 100, 'n_initial': 10}]},
+        'adam_only': {'label': 'Adam Only', 'stages': [
+            {'method': 'adam', 'n_steps': 100, 'lr': 2.0}]},
+        'lbfgs_only': {'label': 'LBFGS Only', 'stages': [
+            {'method': 'lbfgs', 'n_steps': 100, 'lr': 2.0}]},
+        'bayes_adam': {'label': 'Bayes + Adam', 'stages': [
+            {'method': 'bayesian', 'n_calls': 100, 'n_initial': 10},
+            {'method': 'adam', 'n_steps': 50, 'lr': 2.0}]},
+        'bayes_lbfgs': {'label': 'Bayes + LBFGS', 'stages': [
+            {'method': 'bayesian', 'n_calls': 100, 'n_initial': 10},
+            {'method': 'lbfgs', 'n_steps': 50, 'lr': 2.0}]},
+        'adam_lbfgs': {'label': 'Adam + LBFGS', 'stages': [
+            {'method': 'adam', 'n_steps': 50, 'lr': 2.0},
+            {'method': 'lbfgs', 'n_steps': 50, 'lr': 2.0}]},
+        'bayes_adam_lbfgs': {'label': 'Bayes + Adam + LBFGS', 'stages': [
+            {'method': 'bayesian', 'n_calls': 100, 'n_initial': 10},
+            {'method': 'adam', 'n_steps': 50, 'lr': 2.0},
+            {'method': 'lbfgs', 'n_steps': 50, 'lr': 2.0}]},
+        'bayes_lbfgs_adam': {'label': 'Bayes + LBFGS + Adam', 'stages': [
+            {'method': 'bayesian', 'n_calls': 100, 'n_initial': 10},
+            {'method': 'lbfgs', 'n_steps': 50, 'lr': 2.0},
+            {'method': 'adam', 'n_steps': 50, 'lr': 2.0}]},
+        'bayes_sgd': {'label': 'Bayes + SGD', 'stages': [
+            {'method': 'bayesian', 'n_calls': 100, 'n_initial': 10},
+            {'method': 'sgd', 'n_steps': 50, 'lr': 2.0, 'momentum': 0.9}]},
+    },
+}
+
+
+def deep_merge(base, override):
+    """Recursively merge `override` into `base`. Lists and scalars replace."""
+    for key, value in (override or {}).items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            deep_merge(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+
+def load_config(path):
+    """Load a YAML/JSON config merged on top of DEFAULT_CONFIG."""
+    config = copy.deepcopy(DEFAULT_CONFIG)
+
+    if not os.path.exists(path):
+        if os.path.abspath(path) != os.path.abspath(DEFAULT_CONFIG_PATH):
+            raise FileNotFoundError(f"Config file not found: {path}")
+        print(f"⚠️  No config at {path}, using built-in defaults")
+        return config
+
+    with open(path, 'r') as f:
+        user_config = json.load(f) if path.endswith('.json') else yaml.safe_load(f)
+
+    print(f"📄 Config: {path}")
+    return deep_merge(config, user_config or {})
+
+
+def resolve_approaches(config, names):
+    """Validate approach names against the config, defaulting to all of them."""
+    known = config['approaches']
+    names = names or list(known.keys())
+    unknown = [n for n in names if n not in known]
+    if unknown:
+        raise ValueError(f"Unknown approach(es) {unknown}. Available: {list(known.keys())}")
+    return names
+
+
+def approach_label(config, name):
+    """Human readable label for an approach, falling back to its name."""
+    return config['approaches'].get(name, {}).get('label', name)
+
+
+def build_opt_params(config):
+    """Assemble the SpectrumMatchingOptimizer kwargs from the config."""
+    return {
+        'model_path': config['model_path'],
+        'target_spectrum_csv': config['target_spectrum_csv'],
+        'device': config['device'] if torch.cuda.is_available() else "cpu",
+        **config['optimizer'],
+    }
+
+
+def save_run_config(output_dir, config, opt_params, **extra):
+    """Persist the resolved config next to the results."""
+    with open(os.path.join(output_dir, "config.json"), 'w') as f:
+        json.dump({**extra,
+                   'opt_params': {k: list(v) if isinstance(v, tuple) else v for k, v in opt_params.items()},
+                   'config': config}, f, indent=2)
+
+    with open(os.path.join(output_dir, "config.yaml"), 'w') as f:
+        yaml.safe_dump(config, f, sort_keys=False)
+
 
 # =============================================================================
 # UTILITY FUNCTIONS
@@ -110,24 +257,8 @@ def create_energy_axis(length=256, electron_pointing_pixel=62):
 class SpectrumMatchingOptimizer:
     """Flexible optimizer for spectrum matching with Bayesian and/or gradient-based methods."""
     
-    DEFAULT_PARAMS = {
-        'pressure_bounds': (1.0, 50.0),
-        'laser_energy_bounds': (5.0, 50.0),
-        'acquisition_time_bounds': (5.0, 100.0),
-        'batch_size': 16,
-        'spectrum_length': 256,
-        'features': ["E", "P", "ms"],
-        'num_sampling_steps': 18,
-        'sigma_min': 0.002,
-        'sigma_max': 80,
-        'rho': 7,
-        'cfg_scale': 3.0,
-        'smooth_output': True,
-        'smooth_kernel_size': 9,
-        'smooth_sigma': 2.0,
-        'normalize_spectrum': False,
-    }
-    
+    DEFAULT_PARAMS = DEFAULT_CONFIG['optimizer']
+
     def __init__(self, model_path, target_spectrum_csv, device="cuda", seed=None, logger=None, **kwargs):
         # Merge defaults with provided kwargs
         params = {**self.DEFAULT_PARAMS, **kwargs}
@@ -361,78 +492,57 @@ class SpectrumMatchingOptimizer:
 # APPROACH RUNNERS
 # =============================================================================
 
-def run_approach(approach, opt_params, seed, output_dir):
-    """Run a single optimization approach with given seed."""
+def run_stage(optimizer, method, initial_params, **kwargs):
+    """Run a single optimization stage. Extra kwargs go to the run_* method."""
+    if method == 'bayesian':
+        return optimizer.run_bayesian(**kwargs)
+    elif method == 'adam':
+        return optimizer.run_adam(initial_params, **kwargs)
+    elif method == 'lbfgs':
+        return optimizer.run_lbfgs(initial_params, **kwargs)
+    elif method == 'sgd':
+        return optimizer.run_sgd(initial_params, **kwargs)
+    else:
+        raise ValueError(f"Unknown optimization method: {method}")
+
+
+def run_approach(approach, opt_params, seed, output_dir, approaches_config):
+    """Run a single optimization approach (a chain of stages) with given seed."""
     set_seed(seed)
     logger = setup_logging(output_dir, approach, seed)
-    
+
     optimizer = SpectrumMatchingOptimizer(**opt_params, seed=seed, logger=logger)
-    
-    if approach == 'bayesian_only':
-        result = optimizer.run_bayesian(n_calls=100)
-    
-    elif approach == 'adam_only':
-        result = optimizer.run_adam(optimizer.start_params, n_steps=100)
-    
-    elif approach == 'lbfgs_only':
-        result = optimizer.run_lbfgs(optimizer.start_params, n_steps=100)
-    
-    elif approach == 'bayes_adam':
-        bayes_result = optimizer.run_bayesian(n_calls=100)
-        adam_result = optimizer.run_adam(bayes_result['best_params'], n_steps=50)
-        result = adam_result if adam_result['best_mse'] < bayes_result['best_mse'] else bayes_result
-    
-    elif approach == 'bayes_lbfgs':
-        bayes_result = optimizer.run_bayesian(n_calls=100)
-        lbfgs_result = optimizer.run_lbfgs(bayes_result['best_params'], n_steps=50)
-        result = lbfgs_result if lbfgs_result['best_mse'] < bayes_result['best_mse'] else bayes_result
-    
-    elif approach == 'adam_lbfgs':
-        adam_result = optimizer.run_adam(optimizer.start_params, n_steps=50)
-        lbfgs_result = optimizer.run_lbfgs(adam_result['best_params'], n_steps=50)
-        result = lbfgs_result if lbfgs_result['best_mse'] < adam_result['best_mse'] else adam_result
-    
-    elif approach == 'bayes_adam_lbfgs':
-        bayes_result = optimizer.run_bayesian(n_calls=100)
-        adam_result = optimizer.run_adam(bayes_result['best_params'], n_steps=50)
-        best_after_adam = adam_result if adam_result['best_mse'] < bayes_result['best_mse'] else bayes_result
-        lbfgs_result = optimizer.run_lbfgs(best_after_adam['best_params'], n_steps=50)
-        result = lbfgs_result if lbfgs_result['best_mse'] < best_after_adam['best_mse'] else best_after_adam
-    
-    elif approach == 'bayes_lbfgs_adam':
-        bayes_result = optimizer.run_bayesian(n_calls=100)
-        lbfgs_result = optimizer.run_lbfgs(bayes_result['best_params'], n_steps=50)
-        best_after_lbfgs = lbfgs_result if lbfgs_result['best_mse'] < bayes_result['best_mse'] else bayes_result
-        adam_result = optimizer.run_adam(best_after_lbfgs['best_params'], n_steps=50)
-        result = adam_result if adam_result['best_mse'] < best_after_lbfgs['best_mse'] else best_after_lbfgs
-    
-    elif approach == 'bayes_sgd':
-        bayes_result = optimizer.run_bayesian(n_calls=100)
-        sgd_result = optimizer.run_sgd(bayes_result['best_params'], n_steps=50)
-        result = sgd_result if sgd_result['best_mse'] < bayes_result['best_mse'] else bayes_result
-    
-    else:
-        raise ValueError(f"Unknown approach: {approach}")
-    
+
+    stages = approaches_config[approach].get('stages')
+    if not stages:
+        raise ValueError(f"Approach '{approach}' defines no stages")
+
+    # Each stage starts from the best parameters found so far; the best stage wins.
+    best = None
+    for stage in stages:
+        stage_kwargs = dict(stage)
+        method = stage_kwargs.pop('method')
+        initial_params = best['best_params'] if best else optimizer.start_params
+
+        result = run_stage(optimizer, method, initial_params, **stage_kwargs)
+        if best is None or result['best_mse'] < best['best_mse']:
+            best = result
+
     close_logger(logger)
-    return {'best_params': result['best_params'], 'best_mse': result['best_mse'], 'history': optimizer.get_history()}
+    return {'best_params': best['best_params'], 'best_mse': best['best_mse'], 'history': optimizer.get_history()}
 
 
 # =============================================================================
 # COMPARISON TEST
 # =============================================================================
 
-ALL_APPROACHES = ['bayesian_only', 'adam_only', 'lbfgs_only', 'bayes_adam', 'bayes_lbfgs', 'adam_lbfgs', 'bayes_adam_lbfgs', 'bayes_lbfgs_adam', 'bayes_sgd']
-ALL_LABELS = ['Bayesian Only', 'Adam Only', 'LBFGS Only', 'Bayes + Adam', 'Bayes + LBFGS', 'Adam + LBFGS', 'Bayes + Adam + LBFGS', 'Bayes + LBFGS + Adam', 'Bayes + SGD']
-COMPARISON_SEEDS = [67, 156, 236, 391, 429, 504, 742, 782, 823, 918]
+def run_comparison_test(config, output_dir):
+    """Run comparison test: approaches × seeds."""
+    opt_params = build_opt_params(config)
+    seeds = config['run']['comparison_seeds']
+    approaches = resolve_approaches(config, config['run']['approaches'])
+    approach_labels = [approach_label(config, a) for a in approaches]
 
-
-def run_comparison_test(opt_params, output_dir, approaches=None):
-    """Run comparison test: approaches × 10 seeds."""
-    seeds = COMPARISON_SEEDS
-    approaches = approaches or ALL_APPROACHES
-    approach_labels = [ALL_LABELS[ALL_APPROACHES.index(a)] for a in approaches]
-    
     print("="*80)
     print("OPTIMIZER COMPARISON TEST")
     print("="*80)
@@ -440,13 +550,10 @@ def run_comparison_test(opt_params, output_dir, approaches=None):
     print(f"Approaches: {approaches}")
     print(f"Output: {output_dir}")
     print("="*80)
-    
+
     os.makedirs(output_dir, exist_ok=True)
-    
-    # Save config
-    with open(os.path.join(output_dir, "config.json"), 'w') as f:
-        json.dump({'seeds': seeds, 'approaches': approaches, 'opt_params': {k: list(v) if isinstance(v, tuple) else v for k, v in opt_params.items()}}, f, indent=2)
-    
+    save_run_config(output_dir, config, opt_params, seeds=seeds, approaches=approaches)
+
     results = {approach: {} for approach in approaches}
     total = len(approaches) * len(seeds)
     run_num = 0
@@ -458,10 +565,10 @@ def run_comparison_test(opt_params, output_dir, approaches=None):
             
             run_dir = os.path.join(output_dir, f"seed_{seed}", approach)
             os.makedirs(run_dir, exist_ok=True)
-            
-            result = run_approach(approach, opt_params, seed, run_dir)
+
+            result = run_approach(approach, opt_params, seed, run_dir, config['approaches'])
             results[approach][seed] = result
-    
+
     # Save results summary
     summary = {approach: {seed: {'best_mse': r['best_mse'], 'best_params': r['best_params']} 
                for seed, r in seed_results.items()} for approach, seed_results in results.items()}
@@ -579,10 +686,12 @@ def plot_comparison(results, seeds, approaches, labels, output_dir):
 # EXTEND EXISTING COMPARISON
 # =============================================================================
 
-def extend_comparison(opt_params, output_dir, new_approaches):
+def extend_comparison(config, output_dir):
     """Add new approaches to an existing comparison folder."""
-    seeds = COMPARISON_SEEDS
-    
+    opt_params = build_opt_params(config)
+    seeds = config['run']['comparison_seeds']
+    new_approaches = resolve_approaches(config, config['run']['approaches'])
+
     print("="*80)
     print("EXTENDING COMPARISON TEST")
     print("="*80)
@@ -613,7 +722,7 @@ def extend_comparison(opt_params, output_dir, new_approaches):
             run_dir = os.path.join(output_dir, f"seed_{seed}", approach)
             os.makedirs(run_dir, exist_ok=True)
             
-            result = run_approach(approach, opt_params, seed, run_dir)
+            result = run_approach(approach, opt_params, seed, run_dir, config['approaches'])
             new_results[approach][seed] = result
     
     # Merge with existing results
@@ -627,8 +736,8 @@ def extend_comparison(opt_params, output_dir, new_approaches):
     
     # Load all results for plotting (need history too)
     all_approaches = list(existing_results.keys())
-    all_labels = [ALL_LABELS[ALL_APPROACHES.index(a)] if a in ALL_APPROACHES else a for a in all_approaches]
-    
+    all_labels = [approach_label(config, a) for a in all_approaches]
+
     # For new approaches, we have history; for old ones, create dummy history
     full_results = {}
     for approach in all_approaches:
@@ -674,27 +783,29 @@ def extend_comparison(opt_params, output_dir, new_approaches):
 # MULTI-SEED RUN (ORIGINAL FUNCTIONALITY)
 # =============================================================================
 
-def run_multi_seed(opt_params, approach, n_seeds, output_dir):
+def run_multi_seed(config, output_dir):
     """Run multi-seed optimization with a single approach."""
-    np.random.seed(42)
+    opt_params = build_opt_params(config)
+    approach = resolve_approaches(config, [config['run']['approach']])[0]
+    n_seeds = config['run']['n_seeds']
+
+    np.random.seed(config['run']['multi_seed_base'])
     seeds = np.random.randint(0, 100000, size=1000).tolist()[:n_seeds]
-    
+
     print("="*80)
     print(f"MULTI-SEED OPTIMIZATION: {approach.upper()}")
     print("="*80)
     print(f"Seeds: {n_seeds}, Output: {output_dir}")
-    
+
     os.makedirs(output_dir, exist_ok=True)
-    
-    with open(os.path.join(output_dir, "config.json"), 'w') as f:
-        json.dump({'seeds': seeds, 'approach': approach, 'opt_params': {k: list(v) if isinstance(v, tuple) else v for k, v in opt_params.items()}}, f, indent=2)
-    
+    save_run_config(output_dir, config, opt_params, seeds=seeds, approach=approach)
+
     results = []
     for i, seed in enumerate(seeds):
         print(f"\n{'='*20} Run {i+1}/{n_seeds} (seed={seed}) {'='*20}")
-        
+
         run_dir = os.path.join(output_dir, f"seed_{seed}")
-        result = run_approach(approach, opt_params, seed, run_dir)
+        result = run_approach(approach, opt_params, seed, run_dir, config['approaches'])
         result['seed'] = seed
         results.append(result)
         
@@ -722,39 +833,44 @@ def run_multi_seed(opt_params, approach, n_seeds, output_dir):
 
 def main():
     parser = argparse.ArgumentParser(description="Spectrum Matching Optimization")
-    parser.add_argument('--mode', choices=['comparison', 'multi', 'extend'], default='comparison', help='Run mode')
-    parser.add_argument('--approach', default='bayes_adam', help='Approach for multi-seed mode')
-    parser.add_argument('--approaches', nargs='+', default=None, help='Approaches for extend mode')
-    parser.add_argument('--seeds', type=int, default=10, help='Number of seeds for multi-seed mode')
+    parser.add_argument('--config', default=DEFAULT_CONFIG_PATH, help='Path to YAML/JSON config file')
+    # The flags below override the corresponding config values when given.
+    parser.add_argument('--mode', choices=['comparison', 'multi', 'extend'], default=None, help='Run mode')
+    parser.add_argument('--approach', default=None, help='Approach for multi-seed mode')
+    parser.add_argument('--approaches', nargs='+', default=None, help='Approaches for comparison/extend mode')
+    parser.add_argument('--seeds', type=int, default=None, help='Number of seeds for multi-seed mode')
     parser.add_argument('--output', default=None, help='Output directory (required for extend mode)')
-    parser.add_argument('--device', default='cuda:1', help='Device to use')
-    parser.add_argument('--target', default='avg_spectrum_45_25_20.csv', help='Target spectrum CSV')
+    parser.add_argument('--device', default=None, help='Device to use')
+    parser.add_argument('--target', default=None, help='Target spectrum CSV')
+    parser.add_argument('--model', default=None, help='Model checkpoint path')
     args = parser.parse_args()
-    
-    # Common parameters
-    opt_params = {
-        'model_path': "models/edm_4kepochs/ema_ckpt_final.pt",
-        'device': args.device if torch.cuda.is_available() else "cpu",
-        'target_spectrum_csv': args.target,
-        'pressure_bounds': (1.0, 50.0),
-        'laser_energy_bounds': (5.0, 50.0),
-        'acquisition_time_bounds': (5.0, 100.0),
-    }
-    
+
+    config = load_config(args.config)
+
+    # Command line overrides
+    overrides = {'mode': args.mode, 'approach': args.approach, 'approaches': args.approaches,
+                 'n_seeds': args.seeds, 'output': args.output}
+    config['run'].update({k: v for k, v in overrides.items() if v is not None})
+    for key, value in [('device', args.device), ('target_spectrum_csv', args.target), ('model_path', args.model)]:
+        if value is not None:
+            config[key] = value
+
+    run_config = config['run']
+    mode = run_config['mode']
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    if args.mode == 'comparison':
-        output_dir = args.output or f"comparison_{timestamp}"
-        run_comparison_test(opt_params, output_dir)
-    elif args.mode == 'extend':
-        if not args.output:
-            raise ValueError("--output is required for extend mode")
-        if not args.approaches:
-            raise ValueError("--approaches is required for extend mode")
-        extend_comparison(opt_params, args.output, args.approaches)
+
+    if mode == 'comparison':
+        output_dir = run_config['output'] or f"comparison_{timestamp}"
+        run_comparison_test(config, output_dir)
+    elif mode == 'extend':
+        if not run_config['output']:
+            raise ValueError("--output (or run.output) is required for extend mode")
+        if not run_config['approaches']:
+            raise ValueError("--approaches (or run.approaches) is required for extend mode")
+        extend_comparison(config, run_config['output'])
     else:
-        output_dir = args.output or f"multi_{args.approach}_{timestamp}"
-        run_multi_seed(opt_params, args.approach, args.seeds, output_dir)
+        output_dir = run_config['output'] or f"multi_{run_config['approach']}_{timestamp}"
+        run_multi_seed(config, output_dir)
 
 
 if __name__ == "__main__":
