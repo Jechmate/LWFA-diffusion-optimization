@@ -1,6 +1,6 @@
 *.png
 match_spectrum_*
-comparison_*
+comparison_*/
 cosine_annealing_*
 hybrid_optimization_*
 multi_seed_*
