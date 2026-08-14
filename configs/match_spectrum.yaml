@@ -18,6 +18,7 @@ run:
   n_seeds: 10           # multi mode: how many seeds to draw
   multi_seed_base: 42   # multi mode: RNG seed used to draw those seeds
   comparison_seeds: [67, 156, 236, 391, 429, 504, 742, 782, 823, 918]
+  real_vs_generated: false  # comparison mode: also plot real target vs generated (needs intensity_std in target CSV)
 
 # Passed straight to SpectrumMatchingOptimizer.
 optimizer:

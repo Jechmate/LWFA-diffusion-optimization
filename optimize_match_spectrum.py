@@ -84,6 +84,7 @@ DEFAULT_CONFIG = {
         'n_seeds': 10,
         'multi_seed_base': 42,
         'comparison_seeds': [67, 156, 236, 391, 429, 504, 742, 782, 823, 918],
+        'real_vs_generated': False,
     },
     'optimizer': {
         'laser_energy_bounds': [5.0, 50.0],
@@ -578,7 +579,12 @@ def run_comparison_test(config, output_dir):
     
     # Plot comparison
     plot_comparison(results, seeds, approaches, approach_labels, output_dir)
-    
+
+    # Optional: real experimental spectrum vs optimized generated spectrum
+    if config['run'].get('real_vs_generated'):
+        for approach in approaches:
+            plot_real_vs_generated(opt_params, results[approach], seeds, output_dir, approach)
+
     # Print summary
     print("\n" + "="*80)
     print("RESULTS SUMMARY")
@@ -679,6 +685,80 @@ def plot_comparison(results, seeds, approaches, labels, output_dir):
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "comparison.png"), dpi=300, bbox_inches='tight')
     print(f"\n📊 Saved: {os.path.join(output_dir, 'comparison.png')}")
+    plt.close()
+
+
+def plot_real_vs_generated(opt_params, seed_results, seeds, output_dir, approach):
+    """Overlay the real target spectrum (mean ± std) with the optimized generated
+    spectrum (mean ± std across seeds).
+
+    Regenerates each seed's spectrum from its best parameters using the same sampler
+    settings the optimizer scored with. The model is loaded once and latents are
+    re-seeded per seed so each spectrum matches its run.
+    """
+    print(f"\n  Building real-vs-generated figure for {approach}...")
+
+    # Real target: energy_MeV, intensity (mean), optional intensity_std
+    df = pd.read_csv(opt_params['target_spectrum_csv'])
+    energy = df['energy_MeV'].values
+    real_mean = df['intensity'].values
+    real_std = df['intensity_std'].values if 'intensity_std' in df.columns else np.zeros_like(real_mean)
+
+    # Load the model once via a single optimizer instance
+    optimizer = SpectrumMatchingOptimizer(**opt_params)
+    device = optimizer.device
+
+    generated = []
+    for seed in seeds:
+        result = seed_results.get(seed)
+        if result is None:
+            continue
+        set_seed(seed)
+        optimizer.sampler.initialize_latents(
+            n_samples=optimizer.batch_size, resolution=optimizer.spectrum_length, device=device)
+        settings = torch.tensor(result['best_params'], device=device, dtype=torch.float32).unsqueeze(0)
+        with torch.no_grad():
+            spectrum = optimizer._sample_spectrum(settings)
+        generated.append(spectrum.cpu().numpy())
+
+    if not generated:
+        print("    No seed results to plot; skipping.")
+        return
+
+    gen = np.array(generated)
+    gen_mean, gen_std = gen.mean(axis=0), gen.std(axis=0)
+
+    # Two panels: raw and min-max normalized (for shape)
+    def minmax(a):
+        return (a - a.min()) / (a.max() - a.min() + 1e-8)
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    for ax, normalize in zip(axes, (False, True)):
+        if normalize:
+            rm, gm = minmax(real_mean), minmax(gen_mean)
+            rs = real_std / (real_mean.max() - real_mean.min() + 1e-8)
+            gs = gen_std / (gen_mean.max() - gen_mean.min() + 1e-8)
+            title = "Min-max normalized (shape)"
+        else:
+            rm, gm, rs, gs = real_mean, gen_mean, real_std, gen_std
+            title = "Raw intensity"
+
+        ax.plot(energy, rm, color='black', lw=2, label='Real (mean)')
+        ax.fill_between(energy, rm - rs, rm + rs, color='black', alpha=0.2, label='Real ±std (shots)')
+        ax.plot(energy, gm, color='#d62728', lw=2, label='Generated (mean)')
+        ax.fill_between(energy, gm - gs, gm + gs, color='#d62728', alpha=0.2, label='Generated ±std (seeds)')
+        ax.set_xlabel('Energy [MeV]')
+        ax.set_ylabel('Intensity')
+        ax.set_title(title)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=8)
+
+    fig.suptitle(f"{approach}: real experimental target vs optimized generated spectrum "
+                 f"({len(generated)} seeds)", fontsize=13)
+    plt.tight_layout()
+    save_path = os.path.join(output_dir, f"real_vs_generated_{approach}.png")
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"  📊 Saved: {save_path}")
     plt.close()
 
 
