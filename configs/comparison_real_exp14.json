@@ -1,0 +1,14 @@
+{
+  "model_path": "models/edm_4kepochs/ema_ckpt_final.pt",
+  "device": "cuda:1",
+  "target_spectrum_csv": "target_real_exp14_E20_P11_t40.csv",
+  "optimizer": {
+    "normalize_spectrum": false
+  },
+  "run": {
+    "mode": "comparison",
+    "approaches": ["bayes_lbfgs_adam"],
+    "comparison_seeds": [67, 156, 236, 391, 429, 504, 742, 782, 823, 918],
+    "real_vs_generated": true
+  }
+}
