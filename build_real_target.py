@@ -43,9 +43,9 @@ def build_target(experiment, spectra_dir="spectra", length=SPECTRUM_LENGTH):
 
 def main():
     parser = argparse.ArgumentParser(description="Build a real target spectrum CSV")
-    parser.add_argument("--experiment", type=int, default=14, help="Experiment folder in spectra/")
+    parser.add_argument("--experiment", type=int, default=4, help="Experiment folder in spectra/")
     parser.add_argument("--spectra-dir", default="spectra")
-    parser.add_argument("--output", default="target_real_exp14_E20_P11_t40.csv")
+    parser.add_argument("--output", default="target_real_exp4_E13_P15_t20.csv")
     parser.add_argument("--params", default="params.csv", help="params.csv for a settings printout")
     args = parser.parse_args()
 

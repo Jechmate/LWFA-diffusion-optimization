@@ -1,0 +1,236 @@
+{
+  "seeds": [
+    15795,
+    860,
+    76820,
+    54886,
+    6265,
+    82386,
+    37194,
+    87498,
+    44131,
+    60263
+  ],
+  "approach": "bayesian_only",
+  "opt_params": {
+    "model_path": "models/edm_4kepochs/ema_ckpt_final.pt",
+    "target_spectrum_csv": "avg_spectrum_45_25_20.csv",
+    "device": "cuda:1",
+    "laser_energy_bounds": [
+      5.0,
+      50.0
+    ],
+    "pressure_bounds": [
+      1.0,
+      50.0
+    ],
+    "acquisition_time_bounds": [
+      5.0,
+      100.0
+    ],
+    "batch_size": 16,
+    "spectrum_length": 256,
+    "features": [
+      "E",
+      "P",
+      "ms"
+    ],
+    "num_sampling_steps": 18,
+    "sigma_min": 0.002,
+    "sigma_max": 80,
+    "rho": 7,
+    "cfg_scale": 3.0,
+    "smooth_output": true,
+    "smooth_kernel_size": 9,
+    "smooth_sigma": 2.0,
+    "normalize_spectrum": false
+  },
+  "config": {
+    "model_path": "models/edm_4kepochs/ema_ckpt_final.pt",
+    "target_spectrum_csv": "avg_spectrum_45_25_20.csv",
+    "device": "cuda:1",
+    "run": {
+      "mode": "multi",
+      "output": null,
+      "approach": "bayesian_only",
+      "approaches": null,
+      "n_seeds": 10,
+      "multi_seed_base": 42,
+      "comparison_seeds": [
+        67,
+        156,
+        236,
+        391,
+        429,
+        504,
+        742,
+        782,
+        823,
+        918
+      ]
+    },
+    "optimizer": {
+      "laser_energy_bounds": [
+        5.0,
+        50.0
+      ],
+      "pressure_bounds": [
+        1.0,
+        50.0
+      ],
+      "acquisition_time_bounds": [
+        5.0,
+        100.0
+      ],
+      "batch_size": 16,
+      "spectrum_length": 256,
+      "features": [
+        "E",
+        "P",
+        "ms"
+      ],
+      "num_sampling_steps": 18,
+      "sigma_min": 0.002,
+      "sigma_max": 80,
+      "rho": 7,
+      "cfg_scale": 3.0,
+      "smooth_output": true,
+      "smooth_kernel_size": 9,
+      "smooth_sigma": 2.0,
+      "normalize_spectrum": false
+    },
+    "approaches": {
+      "bayesian_only": {
+        "label": "Bayesian Only",
+        "stages": [
+          {
+            "method": "bayesian",
+            "n_calls": 500,
+            "n_initial": 50
+          }
+        ]
+      },
+      "adam_only": {
+        "label": "Adam Only",
+        "stages": [
+          {
+            "method": "adam",
+            "n_steps": 100,
+            "lr": 2.0
+          }
+        ]
+      },
+      "lbfgs_only": {
+        "label": "LBFGS Only",
+        "stages": [
+          {
+            "method": "lbfgs",
+            "n_steps": 100,
+            "lr": 2.0
+          }
+        ]
+      },
+      "bayes_adam": {
+        "label": "Bayes + Adam",
+        "stages": [
+          {
+            "method": "bayesian",
+            "n_calls": 100,
+            "n_initial": 10
+          },
+          {
+            "method": "adam",
+            "n_steps": 50,
+            "lr": 2.0
+          }
+        ]
+      },
+      "bayes_lbfgs": {
+        "label": "Bayes + LBFGS",
+        "stages": [
+          {
+            "method": "bayesian",
+            "n_calls": 100,
+            "n_initial": 10
+          },
+          {
+            "method": "lbfgs",
+            "n_steps": 50,
+            "lr": 2.0
+          }
+        ]
+      },
+      "adam_lbfgs": {
+        "label": "Adam + LBFGS",
+        "stages": [
+          {
+            "method": "adam",
+            "n_steps": 50,
+            "lr": 2.0
+          },
+          {
+            "method": "lbfgs",
+            "n_steps": 50,
+            "lr": 2.0
+          }
+        ]
+      },
+      "bayes_adam_lbfgs": {
+        "label": "Bayes + Adam + LBFGS",
+        "stages": [
+          {
+            "method": "bayesian",
+            "n_calls": 100,
+            "n_initial": 10
+          },
+          {
+            "method": "adam",
+            "n_steps": 50,
+            "lr": 2.0
+          },
+          {
+            "method": "lbfgs",
+            "n_steps": 50,
+            "lr": 2.0
+          }
+        ]
+      },
+      "bayes_lbfgs_adam": {
+        "label": "Bayes + LBFGS + Adam",
+        "stages": [
+          {
+            "method": "bayesian",
+            "n_calls": 100,
+            "n_initial": 10
+          },
+          {
+            "method": "lbfgs",
+            "n_steps": 50,
+            "lr": 2.0
+          },
+          {
+            "method": "adam",
+            "n_steps": 50,
+            "lr": 2.0
+          }
+        ]
+      },
+      "bayes_sgd": {
+        "label": "Bayes + SGD",
+        "stages": [
+          {
+            "method": "bayesian",
+            "n_calls": 100,
+            "n_initial": 10
+          },
+          {
+            "method": "sgd",
+            "n_steps": 50,
+            "lr": 2.0,
+            "momentum": 0.9
+          }
+        ]
+      }
+    }
+  }
+}
