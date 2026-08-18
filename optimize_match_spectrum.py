@@ -41,6 +41,12 @@ so far, and the best stage overall is reported. Defaults ship with:
 7) bayes_adam_lbfgs - Bayesian (100) + Adam (50) + LBFGS (50)
 8) bayes_lbfgs_adam - Bayesian (100) + LBFGS (50) + Adam (50)
 9) bayes_sgd        - Bayesian (100) + SGD (50)
+10) bayes_lbfgs_langevin - Bayesian (100) + LBFGS (50) + Langevin/SGLD (50)
+11) bayes_langevin_lbfgs - Bayesian (100) + Langevin/SGLD (50) + LBFGS (50)
+
+Stage methods: bayesian, adam (RAdam), lbfgs, sgd, langevin (SGLD; kwargs
+noise_scale = sqrt(temperature), decay_power for the annealed step size
+eps_t = lr / (1 + step)**decay_power).
 """
 
 import os
@@ -130,6 +136,14 @@ DEFAULT_CONFIG = {
         'bayes_sgd': {'label': 'Bayes + SGD', 'stages': [
             {'method': 'bayesian', 'n_calls': 100, 'n_initial': 10},
             {'method': 'sgd', 'n_steps': 50, 'lr': 2.0, 'momentum': 0.9}]},
+        'bayes_lbfgs_langevin': {'label': 'Bayes + LBFGS + Langevin', 'stages': [
+            {'method': 'bayesian', 'n_calls': 100, 'n_initial': 10},
+            {'method': 'lbfgs', 'n_steps': 50, 'lr': 2.0},
+            {'method': 'langevin', 'n_steps': 50, 'lr': 2.0, 'noise_scale': 1.0, 'decay_power': 0.5}]},
+        'bayes_langevin_lbfgs': {'label': 'Bayes + Langevin + LBFGS', 'stages': [
+            {'method': 'bayesian', 'n_calls': 100, 'n_initial': 10},
+            {'method': 'langevin', 'n_steps': 50, 'lr': 2.0, 'noise_scale': 1.0, 'decay_power': 0.5},
+            {'method': 'lbfgs', 'n_steps': 50, 'lr': 2.0}]},
     },
 }
 
@@ -484,6 +498,56 @@ class SpectrumMatchingOptimizer:
         print(f"  SGD Best: MSE={best_mse:.6f}")
         return {'best_params': best_params, 'best_mse': best_mse}
 
+    def run_langevin(self, initial_params, n_steps=50, lr=2.0, noise_scale=1.0, decay_power=0.5):
+        """Run Stochastic Gradient Langevin Dynamics (SGLD).
+
+        Per step, with an annealed step size eps_t = lr / (1 + step)**decay_power:
+
+            theta <- theta - eps_t * grad + sqrt(2*eps_t) * noise_scale * N(0, 1)
+
+        The gradient term matches plain SGD (no momentum) so `lr` is comparable to the
+        other stages. `noise_scale` = sqrt(temperature): 1.0 is canonical SGLD, 0.0 is
+        plain SGD, small values give a mild perturbation. `decay_power=0` recovers a
+        constant step size. Best-seen parameters are tracked and returned.
+        """
+        print(f"  Running Langevin/SGLD ({n_steps} steps)")
+
+        params = [torch.tensor(p, device=self.device, requires_grad=True) for p in initial_params]
+        best_mse, best_params = float('inf'), initial_params
+
+        for step in range(n_steps):
+            for p in params:
+                p.grad = None
+            settings = torch.stack(params).unsqueeze(0)
+            spectrum = self._sample_spectrum(settings)
+            loss = self._compute_mse(spectrum)
+
+            # Snapshot the params that produced this loss before perturbing them.
+            mse = loss.item()
+            current = [p.item() for p in params]
+            if mse < best_mse:
+                best_mse = mse
+                best_params = current
+
+            loss.backward()
+            eps = lr / (1.0 + step) ** decay_power
+            with torch.no_grad():
+                for p in params:
+                    noise = torch.randn_like(p) * ((2.0 * eps) ** 0.5) * noise_scale
+                    p.add_(-eps * p.grad + noise)
+
+            self.gradient_history.append({
+                'iteration': step, 'laser_energy': current[0], 'pressure': current[1],
+                'acquisition_time': current[2], 'objective': mse
+            })
+            self._log_step("Langevin", step, current, mse)
+
+            if step % 20 == 0 or step == n_steps - 1:
+                print(f"    Step {step}: MSE={mse:.6f}")
+
+        print(f"  Langevin Best: MSE={best_mse:.6f}")
+        return {'best_params': best_params, 'best_mse': best_mse}
+
     def get_history(self):
         """Get all optimization history."""
         return {'bayesian': self.bayesian_history, 'gradient': self.gradient_history}
@@ -503,6 +567,8 @@ def run_stage(optimizer, method, initial_params, **kwargs):
         return optimizer.run_lbfgs(initial_params, **kwargs)
     elif method == 'sgd':
         return optimizer.run_sgd(initial_params, **kwargs)
+    elif method == 'langevin':
+        return optimizer.run_langevin(initial_params, **kwargs)
     else:
         raise ValueError(f"Unknown optimization method: {method}")
 

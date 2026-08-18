@@ -46,6 +46,9 @@ optimizer:
 #         adam     -> n_steps, lr
 #         lbfgs    -> n_steps, lr
 #         sgd      -> n_steps, lr, momentum
+#         langevin -> n_steps, lr, noise_scale, decay_power
+#                     (SGLD; noise_scale = sqrt(temperature), 1.0 = canonical,
+#                      0 = plain SGD; eps_t = lr / (1 + step)**decay_power)
 approaches:
   bayesian_only:
     label: Bayesian Only
@@ -99,3 +102,17 @@ approaches:
     stages:
       - {method: bayesian, n_calls: 100, n_initial: 10}
       - {method: sgd, n_steps: 50, lr: 2.0, momentum: 0.9}
+
+  bayes_lbfgs_langevin:
+    label: Bayes + LBFGS + Langevin
+    stages:
+      - {method: bayesian, n_calls: 100, n_initial: 10}
+      - {method: lbfgs, n_steps: 50, lr: 2.0}
+      - {method: langevin, n_steps: 50, lr: 2.0, noise_scale: 1.0, decay_power: 0.5}
+
+  bayes_langevin_lbfgs:
+    label: Bayes + Langevin + LBFGS
+    stages:
+      - {method: bayesian, n_calls: 100, n_initial: 10}
+      - {method: langevin, n_steps: 50, lr: 2.0, noise_scale: 1.0, decay_power: 0.5}
+      - {method: lbfgs, n_steps: 50, lr: 2.0}
