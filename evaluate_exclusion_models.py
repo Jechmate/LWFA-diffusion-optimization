@@ -24,8 +24,10 @@ CONFIG = {
     'resolution': 256,
     'features': ['E', 'P', 'ms'],
     'settings_dim': 3,
-    'num_steps': 18,
-    'cfg_scale': 3.0,
+    # Sampler settings to sweep. Every (cfg_scale, num_steps) combination is
+    # evaluated for every exclusion model; results land in cfg<c>_steps<s>/.
+    'cfg_scales': [3.0],
+    'num_steps_list': [18],
     'results_dir': 'exclusion_evaluation_results'
 }
 
@@ -246,6 +248,16 @@ def calculate_wasserstein_distance_1d_spectra(original_spectra, generated_spectr
     
     average_distance = np.mean(distances) if distances else float('nan')
     return average_distance, detailed_results
+
+
+def count_included_bins(detailed_results):
+    """Bins that passed the intensity threshold and entered the average.
+
+    Worth reporting when sweeping: the threshold skips a bin only when BOTH the
+    real and generated averages are below it, so combinations that generate more
+    intensity in otherwise-empty bins average over slightly more bins.
+    """
+    return sum(1 for v in detailed_results.values() if v.get('included'))
 
 def parse_exclusion_model_name(model_name):
     """Extract excluded experiment number from model name."""
@@ -489,13 +501,21 @@ def collect_saved_exclusion_panels(results_dir, data_dir, cfg_scale, num_steps):
         })
     return panels
 
-def evaluate_all_exclusion_models(cfg_scale=3.0, num_steps=18):
-    """Main evaluation function."""
-    
+def evaluate_all_exclusion_models(cfg_scales=None, num_steps_list=None):
+    """Evaluate every exclusion model over every (cfg_scale, num_steps) combination.
+
+    Each model is loaded once and reused across all combinations - only the
+    sampler is rebuilt per num_steps - so a sweep costs one load per model
+    rather than one per model-and-combination.
+    """
+    cfg_scales = list(cfg_scales if cfg_scales is not None else CONFIG['cfg_scales'])
+    num_steps_list = list(num_steps_list if num_steps_list is not None else CONFIG['num_steps_list'])
+    combos = [(c, s) for c in cfg_scales for s in num_steps_list]
+
     # Create results directory
     results_dir = Path(CONFIG['results_dir'])
     results_dir.mkdir(exist_ok=True)
-    
+
     # Find all exclusion models (edm_4kepochs_full_dataset_exclude_*)
     model_dir = Path(CONFIG['model_dir'])
     exclusion_models = [
@@ -503,156 +523,161 @@ def evaluate_all_exclusion_models(cfg_scale=3.0, num_steps=18):
         if d.is_dir() and 'exclude_' in d.name
     ]
     exclusion_models.sort(key=lambda p: parse_exclusion_model_name(p.name) or 0)
-    
+
     print(f"Found {len(exclusion_models)} exclusion models")
-    print(f"Using CFG scale: {cfg_scale}, Sampling steps: {num_steps}")
-    
-    # Results storage
+    print(f"CFG scales: {cfg_scales}")
+    print(f"Sampling steps: {num_steps_list}")
+    print(f"{len(combos)} combination(s) x {len(exclusion_models)} models = "
+          f"{len(combos) * len(exclusion_models)} evaluations")
+
+    # Results storage, per (cfg_scale, num_steps)
     all_results = []
+    results_by_combo = {combo: [] for combo in combos}
 
     # Sufficient statistics for the per-exclusion training normalization
     print("Computing per-exclusion normalization statistics...")
     folder_stats = _folder_intensity_stats(CONFIG['data_dir'], CONFIG['resolution'])
 
+    from src.diffusion import EdmSampler
+
     for model_path in tqdm(exclusion_models, desc="Evaluating models"):
         model_name = model_path.name
-        
+
         # Extract excluded experiment number
         excluded_exp = parse_exclusion_model_name(model_name)
         if excluded_exp is None:
             print(f"Could not parse experiment number from {model_name}")
             continue
-        
+
         print(f"\nEvaluating {model_name} (excluded experiment: {excluded_exp})")
-        
+
         try:
             # Constants this model was trained with (not stored in checkpoints)
             max_intensity, sigma_data = compute_norm_stats(folder_stats, excluded_exp)
             print(f"Training normalization: max_intensity={max_intensity:.4f}, "
                   f"sigma_data={sigma_data:.4f}")
 
-            # Load the model
-            model = load_exclusion_model(str(model_path), CONFIG, sigma_data=sigma_data)
-            from src.diffusion import EdmSampler
-            sampler = EdmSampler(net=model, num_steps=num_steps)
-            
             # Get experimental settings for the excluded experiment
             experiment_settings = get_experiment_settings(excluded_exp, CONFIG['params_file'])
             if experiment_settings is None:
                 print(f"Could not find settings for experiment {excluded_exp}")
                 continue
-            
-            print(f"Experiment settings: E={experiment_settings[0]}, P={experiment_settings[1]}, ms={experiment_settings[2]}")
-            
+
+            print(f"Experiment settings: E={experiment_settings[0]}, "
+                  f"P={experiment_settings[1]}, ms={experiment_settings[2]}")
+
             # Load original spectra for the excluded experiment
             original_data_path = Path(CONFIG['data_dir']) / str(excluded_exp)
             original_spectra = load_original_spectra(original_data_path, CONFIG['resolution'])
-            
+
             if original_spectra is None:
                 print(f"Could not load original spectra for experiment {excluded_exp}")
                 continue
-            
+
             n_original_samples = len(original_spectra)
             print(f"Loaded {n_original_samples} original spectra")
-            
-            # Generate the same number of samples
-            print(f"Generating {n_original_samples} samples...")
-            generated_spectra = sample_spectra_for_experiment(
-                model, sampler, experiment_settings, n_original_samples, CONFIG, cfg_scale
-            )
-            
-            print(f"Generated spectra shape: {generated_spectra.shape}")
+            energy_axis = load_energy_axis(original_data_path, CONFIG['resolution'])
 
-            # transform_vector() in the sampler de-normalizes with a hardcoded 2.5,
-            # but training normalized by max_intensity (the full-file max of this
-            # model's reduced dataset). Rescale so generated spectra are in the
-            # same physical units as the raw experimental spectra.
-            generated_spectra = generated_spectra * (max_intensity / 2.5)
-            
-            # Create subdirectory for this parameter combination
-            param_dir = f"cfg{cfg_scale}_steps{num_steps}"
-            save_dir = save_generated_spectra(generated_spectra, excluded_exp, model_name, 
-                                            str(results_dir / param_dir))
-            print(f"Saved generated spectra to {save_dir}")
-            
-            # Calculate Wasserstein distance
-            avg_wasserstein, detailed_results = calculate_wasserstein_distance_1d_spectra(
-                original_spectra, generated_spectra, min_avg_intensity=0.01
-            )
-            
-            print(f"Average Wasserstein distance: {avg_wasserstein:.6f}")
-            
-            # Create comparison plot
-            plot_path = save_dir / "comparison_plot.png"
-            plot_comparison(original_spectra, generated_spectra, excluded_exp, model_name, plot_path)
-            
-            # Store results
-            result = {
-                'model_name': model_name,
-                'excluded_experiment': excluded_exp,
-                'cfg_scale': cfg_scale,
-                'num_steps': num_steps,
-                'experiment_settings': experiment_settings,
-                'n_samples': n_original_samples,
-                'max_intensity': max_intensity,
-                'sigma_data': sigma_data,
-                'avg_wasserstein_distance': avg_wasserstein,
-                'original_mean_intensity': np.mean(original_spectra),
-                'generated_mean_intensity': np.mean(generated_spectra),
-                'original_std_intensity': np.std(original_spectra),
-                'generated_std_intensity': np.std(generated_spectra),
-                'detailed_results': detailed_results,
-                'original_spectra': original_spectra,
-                'generated_spectra': generated_spectra,
-                'energy_axis': load_energy_axis(original_data_path, CONFIG['resolution']),
-            }
-            
-            all_results.append(result)
-            
+            # Load the model once; reused for every combination below
+            model = load_exclusion_model(str(model_path), CONFIG, sigma_data=sigma_data)
+
+            samplers = {steps: EdmSampler(net=model, num_steps=steps)
+                        for steps in num_steps_list}
+
+            for cfg_scale, num_steps in combos:
+                print(f"  [CFG={cfg_scale}, steps={num_steps}] generating "
+                      f"{n_original_samples} samples...")
+                generated_spectra = sample_spectra_for_experiment(
+                    model, samplers[num_steps], experiment_settings,
+                    n_original_samples, CONFIG, cfg_scale
+                )
+
+                # transform_vector() in the sampler de-normalizes with a hardcoded
+                # 2.5, but training normalized by max_intensity (the full-file max
+                # of this model's reduced dataset). Rescale so generated spectra are
+                # in the same physical units as the raw experimental spectra.
+                generated_spectra = generated_spectra * (max_intensity / 2.5)
+
+                # Create subdirectory for this parameter combination
+                param_dir = f"cfg{cfg_scale}_steps{num_steps}"
+                save_dir = save_generated_spectra(generated_spectra, excluded_exp,
+                                                  model_name, str(results_dir / param_dir))
+
+                # Calculate Wasserstein distance
+                avg_wasserstein, detailed_results = calculate_wasserstein_distance_1d_spectra(
+                    original_spectra, generated_spectra, min_avg_intensity=0.01
+                )
+                n_bins = count_included_bins(detailed_results)
+                print(f"    Wasserstein: {avg_wasserstein:.6f} over {n_bins} bins "
+                      f"-> {save_dir}")
+
+                # Create comparison plot
+                plot_path = save_dir / "comparison_plot.png"
+                plot_comparison(original_spectra, generated_spectra, excluded_exp,
+                                model_name, plot_path)
+
+                result = {
+                    'model_name': model_name,
+                    'excluded_experiment': excluded_exp,
+                    'cfg_scale': cfg_scale,
+                    'num_steps': num_steps,
+                    'experiment_settings': experiment_settings,
+                    'n_samples': n_original_samples,
+                    'max_intensity': max_intensity,
+                    'sigma_data': sigma_data,
+                    'avg_wasserstein_distance': avg_wasserstein,
+                    'n_bins_included': n_bins,
+                    'original_mean_intensity': np.mean(original_spectra),
+                    'generated_mean_intensity': np.mean(generated_spectra),
+                    'original_std_intensity': np.std(original_spectra),
+                    'generated_std_intensity': np.std(generated_spectra),
+                    'detailed_results': detailed_results,
+                    'original_spectra': original_spectra,
+                    'generated_spectra': generated_spectra,
+                    'energy_axis': energy_axis,
+                }
+
+                all_results.append(result)
+                results_by_combo[(cfg_scale, num_steps)].append(result)
+
         except Exception as e:
             import traceback
             print(f"Error evaluating {model_name}: {e}")
             traceback.print_exc()
             continue
         finally:
+            if 'samplers' in locals():
+                del samplers
             if 'model' in locals():
                 del model
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-    
-    if all_results:
+
+    # One overview figure per combination
+    for (cfg_scale, num_steps), combo_results in results_by_combo.items():
+        if not combo_results:
+            continue
         param_dir = results_dir / f"cfg{cfg_scale}_steps{num_steps}"
         plot_all_exclusions_overview(
-            all_results,
+            combo_results,
             param_dir / "all_exclusions_overview.png",
             cfg_scale,
             num_steps,
         )
-    
+
     return all_results
 
-def run_comprehensive_evaluation():
-    """Run evaluation on all exclusion models at the configured sampler settings."""
-    
-    cfg_scales = [CONFIG['cfg_scale']]
-    num_steps_list = [CONFIG['num_steps']]
-    
+def run_comprehensive_evaluation(cfg_scales=None, num_steps_list=None):
+    """Run evaluation on all exclusion models over the sampler-setting sweep."""
+
+    cfg_scales = list(cfg_scales if cfg_scales is not None else CONFIG['cfg_scales'])
+    num_steps_list = list(num_steps_list if num_steps_list is not None else CONFIG['num_steps_list'])
+
     print("Starting exclusion model evaluation...")
     print(f"CFG scales: {cfg_scales}")
     print(f"Sampling steps: {num_steps_list}")
-    
-    # Collect all results
-    all_comprehensive_results = []
-    
-    for cfg_scale in cfg_scales:
-        for num_steps in num_steps_list:
-            print(f"\n{'='*80}")
-            print(f"EVALUATING: CFG={cfg_scale}, Steps={num_steps}")
-            print(f"{'='*80}")
-            
-            # Run evaluation for this parameter combination
-            results = evaluate_all_exclusion_models(cfg_scale=cfg_scale, num_steps=num_steps)
-            all_comprehensive_results.extend(results)
+
+    all_comprehensive_results = evaluate_all_exclusion_models(cfg_scales, num_steps_list)
     
     # Process results
     results_dir = Path(CONFIG['results_dir'])
@@ -672,6 +697,7 @@ def run_comprehensive_evaluation():
             'max_intensity': result['max_intensity'],
             'sigma_data': result['sigma_data'],
             'avg_wasserstein_distance': result['avg_wasserstein_distance'],
+            'n_bins_included': result['n_bins_included'],
             'original_mean_intensity': result['original_mean_intensity'],
             'generated_mean_intensity': result['generated_mean_intensity'],
             'original_std_intensity': result['original_std_intensity'],
@@ -705,6 +731,7 @@ def run_comprehensive_evaluation():
                         'max_wasserstein_distance': param_results['avg_wasserstein_distance'].max(),
                         'avg_original_mean_intensity': param_results['original_mean_intensity'].mean(),
                         'avg_generated_mean_intensity': param_results['generated_mean_intensity'].mean(),
+                        'avg_n_bins_included': param_results['n_bins_included'].mean(),
                     }
                     param_averages.append(avg_result)
         
@@ -745,18 +772,36 @@ if __name__ == "__main__":
         '--plot-only', action='store_true',
         help='Rebuild the 22-experiment overview from saved spectra without resampling',
     )
+    parser.add_argument(
+        '--cfg-scales', type=float, nargs='+', default=None, metavar='C',
+        help=f"CFG scales to evaluate (default {CONFIG['cfg_scales']})",
+    )
+    parser.add_argument(
+        '--num-steps', type=int, nargs='+', default=None, metavar='S',
+        help=f"Sampling step counts to evaluate (default {CONFIG['num_steps_list']})",
+    )
     args = parser.parse_args()
 
+    cfg_scales = args.cfg_scales if args.cfg_scales else CONFIG['cfg_scales']
+    num_steps_list = args.num_steps if args.num_steps else CONFIG['num_steps_list']
+
     if args.plot_only:
-        panels = collect_saved_exclusion_panels(
-            CONFIG['results_dir'], CONFIG['data_dir'],
-            CONFIG['cfg_scale'], CONFIG['num_steps'],
-        )
-        if not panels:
+        made_any = False
+        for cfg_scale in cfg_scales:
+            for num_steps in num_steps_list:
+                panels = collect_saved_exclusion_panels(
+                    CONFIG['results_dir'], CONFIG['data_dir'], cfg_scale, num_steps,
+                )
+                if not panels:
+                    print(f'No saved spectra for CFG={cfg_scale}, steps={num_steps}; skipped.')
+                    continue
+                out = (Path(CONFIG['results_dir']) / f"cfg{cfg_scale}_steps{num_steps}"
+                       / "all_exclusions_overview.png")
+                plot_all_exclusions_overview(panels, out, cfg_scale, num_steps)
+                made_any = True
+        if not made_any:
             raise SystemExit('No saved exclusion spectra found to plot.')
-        out = Path(CONFIG['results_dir']) / f"cfg{CONFIG['cfg_scale']}_steps{CONFIG['num_steps']}" / "all_exclusions_overview.png"
-        plot_all_exclusions_overview(panels, out, CONFIG['cfg_scale'], CONFIG['num_steps'])
     else:
         print("Starting exclusion model evaluation...")
-        results = run_comprehensive_evaluation()
+        results = run_comprehensive_evaluation(cfg_scales, num_steps_list)
         print("Exclusion evaluation complete!") 
