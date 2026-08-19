@@ -15,12 +15,6 @@ warnings.filterwarnings('ignore')
 # Add project root to path
 sys.path.append('.')
 
-# Import your modules
-from src.modules_1d import EDMPrecond
-from src.diffusion import EdmSampler
-from src.spectrum_dataset import SpectrumDataset
-from optimize_conditional import create_energy_axis
-
 # Configuration
 CONFIG = {
     'model_dir': 'models',
@@ -39,6 +33,7 @@ print(f"Using device: {CONFIG['device']}")
 
 def load_exclusion_model(model_path, config):
     """Load a trained diffusion model from a path."""
+    from src.modules_1d import EDMPrecond
     
     # Initialize model
     model = EDMPrecond(
@@ -127,23 +122,11 @@ def load_original_spectra(experiment_folder, resolution=256):
     return np.array(spectra) if spectra else None
 
 
-def experiment_max_intensities(data_dir):
-    """Peak intensity per experiment folder (matches SpectrumDataset training)."""
-    maxima = {}
-    for exp_dir in sorted(Path(data_dir).iterdir()):
-        if not exp_dir.is_dir() or not exp_dir.name.isdigit():
-            continue
-        peak = 0.0
-        for csv_file in exp_dir.glob("*.csv"):
-            intensity = pd.read_csv(csv_file)['intensity']
-            peak = max(peak, float(intensity.max()))
-        maxima[int(exp_dir.name)] = peak
-    return maxima
-
-
-def denormalize_spectra(spectra, max_intensity):
-    """Invert the training map (intensity / max) * 2 - 1."""
-    return (spectra + 1.0) / 2.0 * max_intensity
+def load_energy_axis(experiment_folder, resolution=256):
+    csv_files = sorted(Path(experiment_folder).glob("*.csv"))
+    if not csv_files:
+        return None
+    return pd.read_csv(csv_files[0])['energy'].values[:resolution]
 
 def calculate_wasserstein_distance_1d_spectra(original_spectra, generated_spectra, min_avg_intensity=0.01):
     """
@@ -246,6 +229,7 @@ def get_experiment_settings(experiment_num, params_file):
 
 def save_generated_spectra(generated_spectra, experiment_num, model_name, results_dir):
     """Save generated spectra to files."""
+    from optimize_conditional import create_energy_axis
     save_dir = Path(results_dir) / model_name / str(experiment_num)
     save_dir.mkdir(parents=True, exist_ok=True)
     
@@ -266,6 +250,7 @@ def save_generated_spectra(generated_spectra, experiment_num, model_name, result
 
 def plot_comparison(original_spectra, generated_spectra, experiment_num, model_name, save_path=None):
     """Plot comparison between original and generated spectra."""
+    from optimize_conditional import create_energy_axis
     # Use model resolution and truncate original spectra to match
     model_resolution = generated_spectra.shape[1]  # Should be 256
     
@@ -342,6 +327,121 @@ def plot_comparison(original_spectra, generated_spectra, experiment_num, model_n
     else:
         plt.show()
 
+def _mean_std_along_energy(spectra, energy_axis):
+    """Mean ± std with energy sorted increasing so fill_between is well-defined."""
+    order = np.argsort(energy_axis)
+    energy = energy_axis[order]
+    sorted_spectra = spectra[:, order]
+    mean = np.mean(sorted_spectra, axis=0)
+    std = np.std(sorted_spectra, axis=0)
+    return energy, mean, std
+
+
+def plot_all_exclusions_overview(panels, save_path, cfg_scale, num_steps):
+    """One panel per excluded experiment: real vs generated mean ± std."""
+    panels = sorted(panels, key=lambda p: p['excluded_experiment'])
+    n = len(panels)
+    if n == 0:
+        return
+
+    ncols = 6
+    nrows = int(np.ceil(n / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.4 * ncols, 2.6 * nrows), sharex=True)
+    axes = np.atleast_1d(axes).ravel()
+
+    energy_axis = None
+    for panel in panels:
+        if panel.get('energy_axis') is not None:
+            energy_axis = np.asarray(panel['energy_axis'])
+            break
+    if energy_axis is None:
+        from optimize_conditional import create_energy_axis
+        energy_axis = create_energy_axis(CONFIG['resolution'])
+    real_color = '#1f77b4'
+    gen_color = '#d62728'
+
+    for ax in axes[n:]:
+        ax.set_visible(False)
+
+    for ax, panel in zip(axes, panels):
+        original = panel['original_spectra']
+        generated = panel['generated_spectra']
+        if original.shape[1] > generated.shape[1]:
+            original = original[:, :generated.shape[1]]
+
+        e_real, real_mean, real_std = _mean_std_along_energy(original, energy_axis)
+        e_gen, gen_mean, gen_std = _mean_std_along_energy(generated, energy_axis)
+
+        ax.fill_between(e_real, real_mean - real_std, real_mean + real_std,
+                        color=real_color, alpha=0.25, linewidth=0)
+        ax.plot(e_real, real_mean, color=real_color, lw=1.4, label='Real')
+        ax.fill_between(e_gen, gen_mean - gen_std, gen_mean + gen_std,
+                        color=gen_color, alpha=0.25, linewidth=0)
+        ax.plot(e_gen, gen_mean, color=gen_color, lw=1.4, ls='--', label='Generated')
+
+        settings = panel.get('experiment_settings')
+        exp = panel['excluded_experiment']
+        if settings is not None:
+            ax.set_title(f'Exp {exp}  E={settings[0]:g}, P={settings[1]:g}, t={settings[2]:g}',
+                         fontsize=9)
+        else:
+            ax.set_title(f'Exp {exp}', fontsize=9)
+        ax.grid(True, alpha=0.3)
+        ax.set_xlim(left=0)
+
+    for i, ax in enumerate(axes[:n]):
+        if i // ncols == nrows - 1:
+            ax.set_xlabel('Energy (MeV)', fontsize=8)
+        if i % ncols == 0:
+            ax.set_ylabel('Intensity', fontsize=8)
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='upper center', ncol=2, frameon=False, fontsize=11)
+    fig.suptitle(f'Leave-one-out spectra  (CFG={cfg_scale:g}, steps={num_steps})',
+                 fontsize=13, y=0.995)
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+
+    save_path = Path(save_path)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Overview plot saved to {save_path}")
+
+
+def collect_saved_exclusion_panels(results_dir, data_dir, cfg_scale, num_steps):
+    """Reload real/generated spectra from a previous evaluation run."""
+    param_dir = Path(results_dir) / f"cfg{cfg_scale}_steps{num_steps}"
+    if not param_dir.exists():
+        return []
+
+    panels = []
+    for model_dir in sorted(param_dir.iterdir(), key=lambda p: parse_exclusion_model_name(p.name) or 0):
+        if not model_dir.is_dir():
+            continue
+        excluded_exp = parse_exclusion_model_name(model_dir.name)
+        if excluded_exp is None:
+            continue
+
+        exp_dir = model_dir / str(excluded_exp)
+        npy_path = exp_dir / "generated_spectra.npy"
+        if npy_path.exists():
+            generated = np.load(npy_path)
+        else:
+            generated = load_original_spectra(exp_dir, CONFIG['resolution'])
+        original = load_original_spectra(Path(data_dir) / str(excluded_exp), CONFIG['resolution'])
+        if generated is None or original is None:
+            print(f"Skipping exp {excluded_exp}: missing spectra")
+            continue
+
+        panels.append({
+            'excluded_experiment': excluded_exp,
+            'experiment_settings': get_experiment_settings(excluded_exp, CONFIG['params_file']),
+            'original_spectra': original,
+            'generated_spectra': generated,
+            'energy_axis': load_energy_axis(Path(data_dir) / str(excluded_exp), CONFIG['resolution']),
+        })
+    return panels
+
 def evaluate_all_exclusion_models(cfg_scale=3.0, num_steps=18):
     """Main evaluation function."""
     
@@ -360,8 +460,6 @@ def evaluate_all_exclusion_models(cfg_scale=3.0, num_steps=18):
     print(f"Found {len(exclusion_models)} exclusion models")
     print(f"Using CFG scale: {cfg_scale}, Sampling steps: {num_steps}")
     
-    folder_maxima = experiment_max_intensities(CONFIG['data_dir'])
-    
     # Results storage
     all_results = []
     
@@ -379,6 +477,7 @@ def evaluate_all_exclusion_models(cfg_scale=3.0, num_steps=18):
         try:
             # Load the model
             model = load_exclusion_model(str(model_path), CONFIG)
+            from src.diffusion import EdmSampler
             sampler = EdmSampler(net=model, num_steps=num_steps)
             
             # Get experimental settings for the excluded experiment
@@ -400,17 +499,11 @@ def evaluate_all_exclusion_models(cfg_scale=3.0, num_steps=18):
             n_original_samples = len(original_spectra)
             print(f"Loaded {n_original_samples} original spectra")
             
-            # Training max excludes the held-out experiment, matching SpectrumDataset
-            train_max = max(
-                v for k, v in folder_maxima.items() if k != excluded_exp
-            )
-            
             # Generate the same number of samples
             print(f"Generating {n_original_samples} samples...")
             generated_spectra = sample_spectra_for_experiment(
                 model, sampler, experiment_settings, n_original_samples, CONFIG, cfg_scale
             )
-            generated_spectra = denormalize_spectra(generated_spectra, train_max)
             
             print(f"Generated spectra shape: {generated_spectra.shape}")
             
@@ -444,7 +537,10 @@ def evaluate_all_exclusion_models(cfg_scale=3.0, num_steps=18):
                 'generated_mean_intensity': np.mean(generated_spectra),
                 'original_std_intensity': np.std(original_spectra),
                 'generated_std_intensity': np.std(generated_spectra),
-                'detailed_results': detailed_results
+                'detailed_results': detailed_results,
+                'original_spectra': original_spectra,
+                'generated_spectra': generated_spectra,
+                'energy_axis': load_energy_axis(original_data_path, CONFIG['resolution']),
             }
             
             all_results.append(result)
@@ -459,6 +555,15 @@ def evaluate_all_exclusion_models(cfg_scale=3.0, num_steps=18):
                 del model
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+    
+    if all_results:
+        param_dir = results_dir / f"cfg{cfg_scale}_steps{num_steps}"
+        plot_all_exclusions_overview(
+            all_results,
+            param_dir / "all_exclusions_overview.png",
+            cfg_scale,
+            num_steps,
+        )
     
     return all_results
 
@@ -568,6 +673,24 @@ def run_comprehensive_evaluation():
     return all_comprehensive_results
 
 if __name__ == "__main__":
-    print("Starting exclusion model evaluation...")
-    results = run_comprehensive_evaluation()
-    print("Exclusion evaluation complete!") 
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--plot-only', action='store_true',
+        help='Rebuild the 22-experiment overview from saved spectra without resampling',
+    )
+    args = parser.parse_args()
+
+    if args.plot_only:
+        panels = collect_saved_exclusion_panels(
+            CONFIG['results_dir'], CONFIG['data_dir'],
+            CONFIG['cfg_scale'], CONFIG['num_steps'],
+        )
+        if not panels:
+            raise SystemExit('No saved exclusion spectra found to plot.')
+        out = Path(CONFIG['results_dir']) / f"cfg{CONFIG['cfg_scale']}_steps{CONFIG['num_steps']}" / "all_exclusions_overview.png"
+        plot_all_exclusions_overview(panels, out, CONFIG['cfg_scale'], CONFIG['num_steps'])
+    else:
+        print("Starting exclusion model evaluation...")
+        results = run_comprehensive_evaluation()
+        print("Exclusion evaluation complete!") 
