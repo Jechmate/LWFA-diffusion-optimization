@@ -24,13 +24,13 @@ from optimize_conditional import create_energy_axis
 # Configuration
 CONFIG = {
     'model_dir': 'models',
-    'data_dir': 'data/spectra',
-    'params_file': 'data/params.csv',
-    'device': 'cuda' if torch.cuda.is_available() else 'cpu',
+    'data_dir': 'spectra',
+    'params_file': 'params.csv',
+    'device': 'cuda:1' if torch.cuda.is_available() else 'cpu',
     'resolution': 256,
     'features': ['E', 'P', 'ms'],
     'settings_dim': 3,
-    'num_steps': 30,
+    'num_steps': 18,
     'cfg_scale': 3.0,
     'results_dir': 'exclusion_evaluation_results'
 }
@@ -51,19 +51,17 @@ def load_exclusion_model(model_path, config):
         device=config['device']
     ).to(config['device'])
     
-    # Look for checkpoint files
+    # Prefer the final EMA checkpoint; fall back to the latest epoch file
     checkpoint_files = [
         'ema_ckpt_final.pt',
         'ema_ckpt.pt',
     ]
     
-    # Also look for epoch-specific checkpoints
     if os.path.exists(model_path):
         epoch_files = [f for f in os.listdir(model_path) if f.startswith('ema_ckpt_epoch_') and f.endswith('.pt')]
         if epoch_files:
-            # Sort by epoch number and take the latest
             epoch_files.sort(key=lambda x: int(x.split('_')[3].split('.')[0]))
-            checkpoint_files.insert(0, epoch_files[-1])
+            checkpoint_files.append(epoch_files[-1])
     
     checkpoint_path = None
     for checkpoint_file in checkpoint_files:
@@ -89,8 +87,9 @@ def sample_spectra_for_experiment(model, sampler, experiment_settings, n_samples
     model.eval()
     
     with torch.no_grad():
-        # Convert settings to tensor
-        settings_tensor = torch.tensor(experiment_settings, dtype=torch.float32).reshape(1, -1).to(config['device'])
+        settings_tensor = torch.tensor(
+            experiment_settings, dtype=torch.float32
+        ).reshape(1, -1).repeat(n_samples, 1).to(config['device'])
         
         # Generate samples
         samples = sampler.sample(
@@ -112,21 +111,39 @@ def sample_spectra_for_experiment(model, sampler, experiment_settings, n_samples
         
         return samples_np
 
-def load_original_spectra(experiment_folder):
+def load_original_spectra(experiment_folder, resolution=256):
     """Load original spectra from CSV files in the experiment folder."""
-    csv_files = list(Path(experiment_folder).glob("*.csv"))
+    csv_files = sorted(Path(experiment_folder).glob("*.csv"))
     spectra = []
     
     for csv_file in csv_files:
         df = pd.read_csv(csv_file)
-        # Assuming the CSV has 'intensity' column
         if 'intensity' in df.columns:
-            intensity = df['intensity'].values
+            intensity = df['intensity'].values[:resolution]
             spectra.append(intensity)
         else:
             print(f"Warning: No 'intensity' column found in {csv_file}")
     
     return np.array(spectra) if spectra else None
+
+
+def experiment_max_intensities(data_dir):
+    """Peak intensity per experiment folder (matches SpectrumDataset training)."""
+    maxima = {}
+    for exp_dir in sorted(Path(data_dir).iterdir()):
+        if not exp_dir.is_dir() or not exp_dir.name.isdigit():
+            continue
+        peak = 0.0
+        for csv_file in exp_dir.glob("*.csv"):
+            intensity = pd.read_csv(csv_file)['intensity']
+            peak = max(peak, float(intensity.max()))
+        maxima[int(exp_dir.name)] = peak
+    return maxima
+
+
+def denormalize_spectra(spectra, max_intensity):
+    """Invert the training map (intensity / max) * 2 - 1."""
+    return (spectra + 1.0) / 2.0 * max_intensity
 
 def calculate_wasserstein_distance_1d_spectra(original_spectra, generated_spectra, min_avg_intensity=0.01):
     """
@@ -202,10 +219,8 @@ def calculate_wasserstein_distance_1d_spectra(original_spectra, generated_spectr
 
 def parse_exclusion_model_name(model_name):
     """Extract excluded experiment number from model name."""
-    # Expected format: edm_4kepochs_exclude_{experiment}
-    pattern = r"edm_\d+kepochs_exclude_(\d+)"
-    match = re.match(pattern, model_name)
-    
+    # e.g. edm_4kepochs_full_dataset_exclude_15
+    match = re.search(r"exclude_(\d+)$", model_name)
     if match:
         return int(match.group(1))
     return None
@@ -327,20 +342,25 @@ def plot_comparison(original_spectra, generated_spectra, experiment_num, model_n
     else:
         plt.show()
 
-def evaluate_all_exclusion_models(cfg_scale=3.0, num_steps=30):
+def evaluate_all_exclusion_models(cfg_scale=3.0, num_steps=18):
     """Main evaluation function."""
     
     # Create results directory
     results_dir = Path(CONFIG['results_dir'])
     results_dir.mkdir(exist_ok=True)
     
-    # Find all exclusion models
+    # Find all exclusion models (edm_4kepochs_full_dataset_exclude_*)
     model_dir = Path(CONFIG['model_dir'])
-    exclusion_models = [d for d in model_dir.iterdir() 
-                       if d.is_dir() and 'exclude_' in d.name]
+    exclusion_models = [
+        d for d in model_dir.iterdir()
+        if d.is_dir() and 'exclude_' in d.name
+    ]
+    exclusion_models.sort(key=lambda p: parse_exclusion_model_name(p.name) or 0)
     
     print(f"Found {len(exclusion_models)} exclusion models")
     print(f"Using CFG scale: {cfg_scale}, Sampling steps: {num_steps}")
+    
+    folder_maxima = experiment_max_intensities(CONFIG['data_dir'])
     
     # Results storage
     all_results = []
@@ -371,7 +391,7 @@ def evaluate_all_exclusion_models(cfg_scale=3.0, num_steps=30):
             
             # Load original spectra for the excluded experiment
             original_data_path = Path(CONFIG['data_dir']) / str(excluded_exp)
-            original_spectra = load_original_spectra(original_data_path)
+            original_spectra = load_original_spectra(original_data_path, CONFIG['resolution'])
             
             if original_spectra is None:
                 print(f"Could not load original spectra for experiment {excluded_exp}")
@@ -380,11 +400,17 @@ def evaluate_all_exclusion_models(cfg_scale=3.0, num_steps=30):
             n_original_samples = len(original_spectra)
             print(f"Loaded {n_original_samples} original spectra")
             
+            # Training max excludes the held-out experiment, matching SpectrumDataset
+            train_max = max(
+                v for k, v in folder_maxima.items() if k != excluded_exp
+            )
+            
             # Generate the same number of samples
             print(f"Generating {n_original_samples} samples...")
             generated_spectra = sample_spectra_for_experiment(
                 model, sampler, experiment_settings, n_original_samples, CONFIG, cfg_scale
             )
+            generated_spectra = denormalize_spectra(generated_spectra, train_max)
             
             print(f"Generated spectra shape: {generated_spectra.shape}")
             
@@ -424,19 +450,25 @@ def evaluate_all_exclusion_models(cfg_scale=3.0, num_steps=30):
             all_results.append(result)
             
         except Exception as e:
+            import traceback
             print(f"Error evaluating {model_name}: {e}")
+            traceback.print_exc()
             continue
+        finally:
+            if 'model' in locals():
+                del model
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
     
     return all_results
 
 def run_comprehensive_evaluation():
-    """Run evaluation across different CFG scales and sampling steps."""
+    """Run evaluation on all exclusion models at the configured sampler settings."""
     
-    # Parameter ranges
-    cfg_scales = [6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0]
-    num_steps_list = [10, 20, 30, 40, 50, 60, 70]
+    cfg_scales = [CONFIG['cfg_scale']]
+    num_steps_list = [CONFIG['num_steps']]
     
-    print("Starting comprehensive evaluation...")
+    print("Starting exclusion model evaluation...")
     print(f"CFG scales: {cfg_scales}")
     print(f"Sampling steps: {num_steps_list}")
     
@@ -536,6 +568,6 @@ def run_comprehensive_evaluation():
     return all_comprehensive_results
 
 if __name__ == "__main__":
-    print("Starting comprehensive exclusion model evaluation...")
+    print("Starting exclusion model evaluation...")
     results = run_comprehensive_evaluation()
-    print("Comprehensive evaluation complete!") 
+    print("Exclusion evaluation complete!") 

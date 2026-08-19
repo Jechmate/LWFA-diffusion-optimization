@@ -217,13 +217,13 @@ def train_with_exclusions(exclude_experiments=None):
     args = parser.parse_args()
     
     # Base configuration
-    base_run_name = "edm_4kepochs"
+    base_run_name = "edm_4kepochs_full_dataset"
     args.epochs = 4000
     args.n_samples = 4
     args.batch_size = 128
     args.length = 256
     args.features = ["E", "P", "ms"]
-    args.device = "cuda:1"
+    args.device = "cuda:2"
     args.lr = 1e-3
     args.grad_acc = 1
     args.sample_freq = 1000
@@ -261,10 +261,10 @@ def launch():
     # Specify which experiments to exclude during training
     # Each number corresponds to a folder name in data/spectra/
     # Set to None or empty list to train without exclusions
-    # exclude_experiments = [3, 8, 11, 19, 21]  # Example: exclude experiments 3, 8, 11, 19, 21
+    exclude_experiments = range(1, 23)  # Example: exclude experiments 3, 8, 11, 19, 21
     
     # Uncomment the line below to train without any exclusions
-    exclude_experiments = None
+    # exclude_experiments = None
     
     train_with_exclusions(exclude_experiments)
 

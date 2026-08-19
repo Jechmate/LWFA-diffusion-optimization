@@ -10,3 +10,6 @@ spectrum_target*
 *__pycache__*
 .DS_Store
 runs*
+models/
+exclusion_evaluation_results/
+results
