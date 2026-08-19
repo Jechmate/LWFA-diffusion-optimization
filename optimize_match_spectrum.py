@@ -44,6 +44,8 @@ so far, and the best stage overall is reported. Defaults ship with:
 10) bayes_lbfgs_langevin - Bayesian (100) + LBFGS (50) + Langevin/SGLD (50)
 11) bayes_langevin_lbfgs - Bayesian (100) + Langevin/SGLD (50) + LBFGS (50)
 12) bayes_prior_only     - Bayesian (100) with the surrogate loss cube as GP prior mean
+13) bayes_prior_lbfgs_adam - Bayes+prior (100) + LBFGS (50) + RAdam (50)
+14) bayes_prior_adam_lbfgs - Bayes+prior (100) + RAdam (50) + LBFGS (50)
 
 Stage methods: bayesian, adam (RAdam), lbfgs, sgd, langevin (SGLD; kwargs
 noise_scale = sqrt(temperature), decay_power for the annealed step size
@@ -150,6 +152,16 @@ DEFAULT_CONFIG = {
         'bayes_prior_only': {'label': 'Bayes (surrogate prior)', 'stages': [
             {'method': 'bayesian_prior', 'n_calls': 100, 'n_initial': 10,
              'prior_npz': 'loss_landscape_bounds.npz'}]},
+        'bayes_prior_lbfgs_adam': {'label': 'Bayes(prior) + LBFGS + Adam', 'stages': [
+            {'method': 'bayesian_prior', 'n_calls': 100, 'n_initial': 10,
+             'prior_npz': 'loss_landscape_bounds.npz'},
+            {'method': 'lbfgs', 'n_steps': 50, 'lr': 2.0},
+            {'method': 'adam', 'n_steps': 50, 'lr': 2.0}]},
+        'bayes_prior_adam_lbfgs': {'label': 'Bayes(prior) + Adam + LBFGS', 'stages': [
+            {'method': 'bayesian_prior', 'n_calls': 100, 'n_initial': 10,
+             'prior_npz': 'loss_landscape_bounds.npz'},
+            {'method': 'adam', 'n_steps': 50, 'lr': 2.0},
+            {'method': 'lbfgs', 'n_steps': 50, 'lr': 2.0}]},
     },
 }
 
