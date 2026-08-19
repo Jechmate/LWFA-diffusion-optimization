@@ -205,7 +205,9 @@ class UNet_conditional(nn.Module):
         # Add class embedding to time encoding if class label y is provided
         if y is not None:
             y = self.label_prep(y).squeeze()
-            t += y
+            # Out-of-place so a batch-1 time embedding (scalar sigma) broadcasts
+            # against per-sample settings, i.e. y of shape (n_samples, time_dim).
+            t = t + y
 
         x1 = self.inc(x)
         x2 = self.down1(x1, t)
