@@ -49,6 +49,8 @@ optimizer:
 #         langevin -> n_steps, lr, noise_scale, decay_power
 #                     (SGLD; noise_scale = sqrt(temperature), 1.0 = canonical,
 #                      0 = plain SGD; eps_t = lr / (1 + step)**decay_power)
+#         bayesian_prior -> n_calls, n_initial, prior_npz (3D loss cube .npz from
+#                           plot_loss_landscape.py; null = flat prior, matched baseline)
 approaches:
   bayesian_only:
     label: Bayesian Only
@@ -116,3 +118,8 @@ approaches:
       - {method: bayesian, n_calls: 100, n_initial: 10}
       - {method: langevin, n_steps: 50, lr: 2.0, noise_scale: 1.0, decay_power: 0.5}
       - {method: lbfgs, n_steps: 50, lr: 2.0}
+
+  bayes_prior_only:
+    label: Bayes (surrogate prior)
+    stages:
+      - {method: bayesian_prior, n_calls: 100, n_initial: 10, prior_npz: loss_landscape_bounds.npz}
