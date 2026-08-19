@@ -1,0 +1,18 @@
+{
+  "model_path": "models/edm_4kepochs/ema_ckpt_final.pt",
+  "device": "cuda:2",
+  "target_spectrum_csv": "avg_spectrum_45_25_20.csv",
+  "optimizer": {
+    "normalize_spectrum": false
+  },
+  "run": {
+    "mode": "comparison",
+    "approaches": [
+      "bayes_lbfgs_adam",
+      "bayes_prior_only",
+      "bayes_prior_lbfgs_adam",
+      "bayes_prior_adam_lbfgs"
+    ],
+    "comparison_seeds": [67, 156, 236, 391, 429, 504, 742, 782, 823, 918]
+  }
+}

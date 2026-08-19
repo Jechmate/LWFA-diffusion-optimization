@@ -123,3 +123,17 @@ approaches:
     label: Bayes (surrogate prior)
     stages:
       - {method: bayesian_prior, n_calls: 100, n_initial: 10, prior_npz: loss_landscape_bounds.npz}
+
+  bayes_prior_lbfgs_adam:
+    label: Bayes(prior) + LBFGS + Adam
+    stages:
+      - {method: bayesian_prior, n_calls: 100, n_initial: 10, prior_npz: loss_landscape_bounds.npz}
+      - {method: lbfgs, n_steps: 50, lr: 2.0}
+      - {method: adam, n_steps: 50, lr: 2.0}
+
+  bayes_prior_adam_lbfgs:
+    label: Bayes(prior) + Adam + LBFGS
+    stages:
+      - {method: bayesian_prior, n_calls: 100, n_initial: 10, prior_npz: loss_landscape_bounds.npz}
+      - {method: adam, n_steps: 50, lr: 2.0}
+      - {method: lbfgs, n_steps: 50, lr: 2.0}
