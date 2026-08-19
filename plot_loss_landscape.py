@@ -409,7 +409,7 @@ def main():
 
         output = args.output or 'loss_landscape_pairs.png'
         npz = os.path.splitext(output)[0] + '.npz'
-        np.savez(npz, Z=Z, **grids)
+        np.savez(npz, Z=Z, target=opt_params['target_spectrum_csv'], **grids)
         print(f"Saved grid: {npz}")
         plot_pairs(grids, Z, centre, output, linear=args.linear_color, overlay_pts=overlay_pts)
     else:
@@ -424,7 +424,8 @@ def main():
 
         output = args.output or 'loss_landscape_EP.png'
         npz = os.path.splitext(output)[0] + '.npz'
-        np.savez(npz, Z=Z, E=grids['E'], P=grids['P'], t_open=args.t_open)
+        np.savez(npz, Z=Z, E=grids['E'], P=grids['P'], t_open=args.t_open,
+                 target=opt_params['target_spectrum_csv'])
         print(f"Saved grid: {npz}")
         plot_single_plane(grids['E'], grids['P'], Z.T, 'E', 'P', 't_open', args.t_open,
                           output, centre=centre, linear=args.linear_color, overlay_pts=overlay_pts)

@@ -1,0 +1,21 @@
+{
+  "model_path": "models/edm_4kepochs/ema_ckpt_final.pt",
+  "device": "cuda:2",
+  "target_spectrum_csv": "avg_spectrum_45_25_20.csv",
+  "optimizer": {
+    "normalize_spectrum": false
+  },
+  "approaches": {
+    "bayes_flat_only": {
+      "label": "Bayes (flat prior, matched)",
+      "stages": [
+        {"method": "bayesian_prior", "n_calls": 100, "n_initial": 10, "prior_npz": null}
+      ]
+    }
+  },
+  "run": {
+    "mode": "comparison",
+    "approaches": ["bayesian_only", "bayes_flat_only", "bayes_prior_only"],
+    "comparison_seeds": [67, 156, 236, 391, 429, 504, 742, 782, 823, 918]
+  }
+}

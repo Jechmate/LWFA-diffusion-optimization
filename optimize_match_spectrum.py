@@ -43,10 +43,13 @@ so far, and the best stage overall is reported. Defaults ship with:
 9) bayes_sgd        - Bayesian (100) + SGD (50)
 10) bayes_lbfgs_langevin - Bayesian (100) + LBFGS (50) + Langevin/SGLD (50)
 11) bayes_langevin_lbfgs - Bayesian (100) + Langevin/SGLD (50) + LBFGS (50)
+12) bayes_prior_only     - Bayesian (100) with the surrogate loss cube as GP prior mean
 
 Stage methods: bayesian, adam (RAdam), lbfgs, sgd, langevin (SGLD; kwargs
 noise_scale = sqrt(temperature), decay_power for the annealed step size
-eps_t = lr / (1 + step)**decay_power).
+eps_t = lr / (1 + step)**decay_power), bayesian_prior (GP prior mean from a
+precomputed 3D loss cube; kwargs prior_npz - null gives the matched flat-mean
+baseline).
 """
 
 import os
@@ -144,6 +147,9 @@ DEFAULT_CONFIG = {
             {'method': 'bayesian', 'n_calls': 100, 'n_initial': 10},
             {'method': 'langevin', 'n_steps': 50, 'lr': 2.0, 'noise_scale': 1.0, 'decay_power': 0.5},
             {'method': 'lbfgs', 'n_steps': 50, 'lr': 2.0}]},
+        'bayes_prior_only': {'label': 'Bayes (surrogate prior)', 'stages': [
+            {'method': 'bayesian_prior', 'n_calls': 100, 'n_initial': 10,
+             'prior_npz': 'loss_landscape_bounds.npz'}]},
     },
 }
 
@@ -283,6 +289,7 @@ class SpectrumMatchingOptimizer:
         self.device = device
         self.seed = seed
         self.logger = logger
+        self.target_spectrum_csv = target_spectrum_csv
         
         if seed is not None:
             set_seed(seed)
@@ -389,6 +396,117 @@ class SpectrumMatchingOptimizer:
         best = min(self.bayesian_history, key=lambda x: x['objective'])
         print(f"  Bayesian Best: MSE={best['objective']:.6f}")
         return {'best_params': result.x, 'best_mse': result.fun}
+
+    def run_bayesian_prior(self, n_calls=100, n_initial=10, prior_npz=None,
+                           xi=0.01, n_candidates=4096):
+        """Bayesian optimization with the surrogate loss landscape as the GP prior mean.
+
+        A GP with prior mean m(x) has posterior mean m(x) + k(x,X)K^-1(y - m(X)),
+        so it is implemented by fitting the GP to residuals y - m(x) and adding m
+        back inside the acquisition. m(x) trilinearly interpolates a 3D loss cube
+        precomputed by plot_loss_landscape.py (prior_npz), so the search starts
+        from the surrogate's belief about the landscape instead of a flat prior.
+        With prior_npz=None the identical loop runs with m = 0, giving an exactly
+        matched no-prior (zeroth-order) baseline.
+
+        Implemented as a self-contained EI loop (sklearn GP on the unit cube,
+        candidate sampling) because skopt's gp_minimize has no hook for a
+        non-constant prior mean.
+        """
+        from scipy.stats import norm
+        from scipy.interpolate import RegularGridInterpolator
+        from sklearn.gaussian_process import GaussianProcessRegressor
+        from sklearn.gaussian_process.kernels import Matern, WhiteKernel, ConstantKernel
+
+        bounds = np.array([self.laser_energy_bounds, self.pressure_bounds,
+                           self.acquisition_time_bounds], dtype=float)
+        span = bounds[:, 1] - bounds[:, 0]
+
+        if prior_npz:
+            if not os.path.exists(prior_npz):
+                raise FileNotFoundError(
+                    f"Prior cube {prior_npz} not found - generate it with e.g.\n"
+                    f"  python plot_loss_landscape.py --e-min 5 --e-max 50 --p-min 1 "
+                    f"--p-max 50 --t-min 5 --t-max 100 --output "
+                    f"{os.path.splitext(prior_npz)[0]}.png")
+            data = np.load(prior_npz)
+            if 'Z' not in data.files or data['Z'].ndim != 3:
+                raise ValueError(f"{prior_npz} holds no 3D loss cube - run "
+                                 f"plot_loss_landscape.py in 3d mode first")
+            if 'target' in data.files and str(data['target']) != self.target_spectrum_csv:
+                print(f"  WARNING: prior cube target ({data['target']}) differs from "
+                      f"this run's target ({self.target_spectrum_csv})")
+            axes = [np.asarray(data[k], dtype=float) for k in ('E', 'P', 't_open')]
+            cube = RegularGridInterpolator(axes, np.asarray(data['Z'], dtype=float))
+            lo = np.array([k[0] for k in axes])
+            hi = np.array([k[-1] for k in axes])
+            if np.any(lo > bounds[:, 0]) or np.any(hi < bounds[:, 1]):
+                print(f"  WARNING: cube covers E[{lo[0]:g},{hi[0]:g}] "
+                      f"P[{lo[1]:g},{hi[1]:g}] t[{lo[2]:g},{hi[2]:g}], smaller than the "
+                      f"search bounds; prior mean is clamped to the cube edge outside")
+            mean_fn = lambda X: cube(np.clip(X, lo, hi))
+            print(f"  Running Bayesian+prior ({n_calls} calls, prior={prior_npz})")
+        else:
+            mean_fn = lambda X: np.zeros(len(X))
+            print(f"  Running Bayesian+prior ({n_calls} calls, flat prior)")
+
+        rng = np.random.default_rng(self.seed if self.seed is not None else 42)
+        # Mirrors skopt's GP recipe: ARD Matern 5/2 + white noise on the unit cube.
+        kernel = (ConstantKernel(1.0, (0.01, 1000.0))
+                  * Matern(length_scale=[0.3] * 3, length_scale_bounds=(0.01, 10.0), nu=2.5)
+                  + WhiteKernel(1e-8, (1e-12, 1e-2)))
+        gp = GaussianProcessRegressor(kernel=kernel, normalize_y=True, alpha=1e-10,
+                                      n_restarts_optimizer=2,
+                                      random_state=int(self.seed or 42))
+
+        def objective(x):
+            settings = torch.tensor([float(v) for v in x], device=self.device).unsqueeze(0)
+            with torch.no_grad():
+                spectrum = self._sample_spectrum(settings)
+            mse = self._compute_mse(spectrum).item()
+            self.bayesian_history.append({
+                'laser_energy': float(x[0]), 'pressure': float(x[1]),
+                'acquisition_time': float(x[2]), 'objective': mse,
+                'spectrum': spectrum.cpu().numpy()
+            })
+            self._log_step("Bayesian", len(self.bayesian_history), [float(v) for v in x], mse)
+            if len(self.bayesian_history) % 10 == 0:
+                print(f"    Eval {len(self.bayesian_history)}: "
+                      f"[{x[0]:.2f}, {x[1]:.2f}, {x[2]:.2f}] -> MSE={mse:.6f}")
+            return mse
+
+        # Initial design: the run's random start point, then uniform random points
+        # (same role as x0 + n_initial_points in run_bayesian).
+        init = [np.asarray(self.start_params, dtype=float)]
+        init += [bounds[:, 0] + rng.random(3) * span for _ in range(max(n_initial - 1, 0))]
+
+        X_obs, y_obs = [], []
+        for it in range(n_calls):
+            if it < len(init):
+                x = init[it]
+            else:
+                X = np.asarray(X_obs)
+                fitted = gp.fit((X - bounds[:, 0]) / span,
+                                np.asarray(y_obs) - mean_fn(X))
+                cand = bounds[:, 0] + rng.random((n_candidates, 3)) * span
+                x_best = X_obs[int(np.argmin(y_obs))]
+                local = np.clip(x_best + rng.normal(0.0, 0.02, (256, 3)) * span,
+                                bounds[:, 0], bounds[:, 1])
+                cand = np.vstack([cand, local])
+                mu_r, sd = fitted.predict((cand - bounds[:, 0]) / span, return_std=True)
+                mu = mu_r + mean_fn(cand)
+                imp = min(y_obs) - mu - xi
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    z = np.where(sd > 0, imp / sd, 0.0)
+                    ei = np.where(sd > 0, imp * norm.cdf(z) + sd * norm.pdf(z), 0.0)
+                x = cand[int(np.argmax(ei))]
+            y = objective(x)
+            X_obs.append(np.asarray(x, dtype=float))
+            y_obs.append(y)
+
+        best = int(np.argmin(y_obs))
+        print(f"  Bayesian+prior Best: MSE={y_obs[best]:.6f}")
+        return {'best_params': [float(v) for v in X_obs[best]], 'best_mse': float(y_obs[best])}
 
     def run_adam(self, initial_params, n_steps=100, lr=2.0):
         """Run Adam optimization."""
@@ -567,6 +685,8 @@ def run_stage(optimizer, method, initial_params, **kwargs):
         return optimizer.run_lbfgs(initial_params, **kwargs)
     elif method == 'sgd':
         return optimizer.run_sgd(initial_params, **kwargs)
+    elif method == 'bayesian_prior':
+        return optimizer.run_bayesian_prior(**kwargs)
     elif method == 'langevin':
         return optimizer.run_langevin(initial_params, **kwargs)
     else:
