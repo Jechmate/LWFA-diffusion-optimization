@@ -31,8 +31,13 @@ CONFIG = {
 
 print(f"Using device: {CONFIG['device']}")
 
-def load_exclusion_model(model_path, config):
-    """Load a trained diffusion model from a path."""
+def load_exclusion_model(model_path, config, sigma_data=0.112):
+    """Load a trained diffusion model from a path.
+
+    sigma_data is NOT stored in the checkpoints (it is a plain attribute of
+    EDMPrecond, not a registered buffer), so the caller must supply the value
+    the model was trained with - see compute_norm_stats().
+    """
     from src.modules_1d import EDMPrecond
     
     # Initialize model
@@ -41,7 +46,7 @@ def load_exclusion_model(model_path, config):
         settings_dim=config['settings_dim'],
         sigma_min=0,
         sigma_max=float('inf'),
-        sigma_data=0.112,  # Default value, will be overridden if available
+        sigma_data=sigma_data,
         model_type='UNet_conditional',
         device=config['device']
     ).to(config['device'])
@@ -76,6 +81,48 @@ def load_exclusion_model(model_path, config):
     model.eval()
     
     return model
+
+def _folder_intensity_stats(data_dir, resolution=256):
+    """Per-experiment sufficient statistics of the raw intensities.
+
+    For each spectra/<N> folder: (full-file max, and count / sum / sum-of-squares
+    over the first `resolution` bins). One pass over the data; per-exclusion
+    normalization constants are then combined from these without re-reading.
+    """
+    stats = {}
+    for folder in sorted(Path(data_dir).iterdir()):
+        if not folder.is_dir() or not folder.name.isdigit():
+            continue
+        fmax, n, s, q = -np.inf, 0, 0.0, 0.0
+        for csv_file in folder.glob('*.csv'):
+            vals = pd.read_csv(csv_file)['intensity'].values.astype(np.float64)
+            fmax = max(fmax, float(vals.max()))
+            t = vals[:resolution]
+            n += t.size
+            s += float(t.sum())
+            q += float((t ** 2).sum())
+        stats[int(folder.name)] = (fmax, n, s, q)
+    return stats
+
+
+def compute_norm_stats(folder_stats, excluded_exp):
+    """Reproduce the training normalization constants for one exclusion run.
+
+    SpectrumDataset(normalize=True) divides by the max intensity over the FULL
+    (untruncated) files of every non-excluded experiment, maps to [-1, 1] via
+    (x/max)*2 - 1, then truncates to 256 bins; calculate_sigma_data() is the
+    (unbiased) std of that tensor. std((2/M)*x - 1) = (2/M)*std(x), so both
+    constants follow from the per-folder sufficient statistics.
+    """
+    included = [v for k, v in folder_stats.items() if k != excluded_exp]
+    max_intensity = max(v[0] for v in included)
+    n = sum(v[1] for v in included)
+    s = sum(v[2] for v in included)
+    q = sum(v[3] for v in included)
+    var_raw = (q - s * s / n) / (n - 1)
+    sigma_data = (2.0 / max_intensity) * float(np.sqrt(var_raw))
+    return float(max_intensity), sigma_data
+
 
 def sample_spectra_for_experiment(model, sampler, experiment_settings, n_samples, config, cfg_scale=3.0):
     """Generate spectra for a specific experiment."""
@@ -462,7 +509,11 @@ def evaluate_all_exclusion_models(cfg_scale=3.0, num_steps=18):
     
     # Results storage
     all_results = []
-    
+
+    # Sufficient statistics for the per-exclusion training normalization
+    print("Computing per-exclusion normalization statistics...")
+    folder_stats = _folder_intensity_stats(CONFIG['data_dir'], CONFIG['resolution'])
+
     for model_path in tqdm(exclusion_models, desc="Evaluating models"):
         model_name = model_path.name
         
@@ -475,8 +526,13 @@ def evaluate_all_exclusion_models(cfg_scale=3.0, num_steps=18):
         print(f"\nEvaluating {model_name} (excluded experiment: {excluded_exp})")
         
         try:
+            # Constants this model was trained with (not stored in checkpoints)
+            max_intensity, sigma_data = compute_norm_stats(folder_stats, excluded_exp)
+            print(f"Training normalization: max_intensity={max_intensity:.4f}, "
+                  f"sigma_data={sigma_data:.4f}")
+
             # Load the model
-            model = load_exclusion_model(str(model_path), CONFIG)
+            model = load_exclusion_model(str(model_path), CONFIG, sigma_data=sigma_data)
             from src.diffusion import EdmSampler
             sampler = EdmSampler(net=model, num_steps=num_steps)
             
@@ -506,6 +562,12 @@ def evaluate_all_exclusion_models(cfg_scale=3.0, num_steps=18):
             )
             
             print(f"Generated spectra shape: {generated_spectra.shape}")
+
+            # transform_vector() in the sampler de-normalizes with a hardcoded 2.5,
+            # but training normalized by max_intensity (the full-file max of this
+            # model's reduced dataset). Rescale so generated spectra are in the
+            # same physical units as the raw experimental spectra.
+            generated_spectra = generated_spectra * (max_intensity / 2.5)
             
             # Create subdirectory for this parameter combination
             param_dir = f"cfg{cfg_scale}_steps{num_steps}"
@@ -532,6 +594,8 @@ def evaluate_all_exclusion_models(cfg_scale=3.0, num_steps=18):
                 'num_steps': num_steps,
                 'experiment_settings': experiment_settings,
                 'n_samples': n_original_samples,
+                'max_intensity': max_intensity,
+                'sigma_data': sigma_data,
                 'avg_wasserstein_distance': avg_wasserstein,
                 'original_mean_intensity': np.mean(original_spectra),
                 'generated_mean_intensity': np.mean(generated_spectra),
@@ -605,6 +669,8 @@ def run_comprehensive_evaluation():
             'P': result['experiment_settings'][1], 
             'ms': result['experiment_settings'][2],
             'n_samples': result['n_samples'],
+            'max_intensity': result['max_intensity'],
+            'sigma_data': result['sigma_data'],
             'avg_wasserstein_distance': result['avg_wasserstein_distance'],
             'original_mean_intensity': result['original_mean_intensity'],
             'generated_mean_intensity': result['generated_mean_intensity'],
