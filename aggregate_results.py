@@ -247,7 +247,10 @@ def plot_comparison(rows, output, group_by):
     fig, axes = plt.subplots(1, 3, figsize=(20, 6))
 
     ax = axes[0]
-    bp = ax.boxplot(data, labels=labels, patch_artist=True)
+    # `labels` was renamed `tick_labels` in matplotlib 3.9; set ticks explicitly.
+    bp = ax.boxplot(data, patch_artist=True)
+    ax.set_xticks(range(1, len(labels) + 1))
+    ax.set_xticklabels(labels)
     for patch, color in zip(bp['boxes'], colors):
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
