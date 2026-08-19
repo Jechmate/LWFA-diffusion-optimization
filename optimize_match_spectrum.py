@@ -452,8 +452,12 @@ class SpectrumMatchingOptimizer:
 
         rng = np.random.default_rng(self.seed if self.seed is not None else 42)
         # Mirrors skopt's GP recipe: ARD Matern 5/2 + white noise on the unit cube.
+        # The upper length-scale bound is deliberately loose (skopt uses 100 too):
+        # this objective is a broad plateau with one narrow basin, so the MLE length
+        # scale is legitimately large and a tight ceiling censors it (sklearn then
+        # emits a ConvergenceWarning about hitting the bound).
         kernel = (ConstantKernel(1.0, (0.01, 1000.0))
-                  * Matern(length_scale=[0.3] * 3, length_scale_bounds=(0.01, 10.0), nu=2.5)
+                  * Matern(length_scale=[0.3] * 3, length_scale_bounds=(0.01, 100.0), nu=2.5)
                   + WhiteKernel(1e-8, (1e-12, 1e-2)))
         gp = GaussianProcessRegressor(kernel=kernel, normalize_y=True, alpha=1e-10,
                                       n_restarts_optimizer=2,
@@ -795,7 +799,7 @@ def run_comparison_test(config, output_dir):
 def plot_comparison(results, seeds, approaches, labels, output_dir):
     """Create comparison plots."""
     # Generate enough colors for all approaches
-    cmap = plt.cm.get_cmap('tab10')
+    cmap = plt.get_cmap('tab10')
     colors = [cmap(i) for i in range(len(approaches))]
     
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
@@ -803,7 +807,11 @@ def plot_comparison(results, seeds, approaches, labels, output_dir):
     # 1. Box plot
     ax = axes[0, 0]
     mse_data = [[results[a][s]['best_mse'] for s in seeds] for a in approaches]
-    bp = ax.boxplot(mse_data, labels=labels, patch_artist=True)
+    # Set tick labels explicitly: boxplot's `labels` kwarg was renamed
+    # `tick_labels` in matplotlib 3.9, so avoid the parameter entirely.
+    bp = ax.boxplot(mse_data, patch_artist=True)
+    ax.set_xticks(range(1, len(labels) + 1))
+    ax.set_xticklabels(labels)
     for patch, color in zip(bp['boxes'], colors):
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
