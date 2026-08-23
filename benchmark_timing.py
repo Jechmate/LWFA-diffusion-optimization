@@ -169,6 +169,8 @@ def main():
     parser.add_argument('--sweep-steps', type=int, nargs='+', default=None, metavar='S',
                         help='Also sweep these step counts to get the marginal per-step cost')
     parser.add_argument('--json', default=None, help='Write results to this JSON file')
+    parser.add_argument('--verify-grad', action='store_true',
+                        help='Check the settings gradient is unchanged by freezing the model')
     args = parser.parse_args()
 
     settings_row = [float(v) for v in args.settings.split(',')]
@@ -195,6 +197,32 @@ def main():
 
     optimizer = SpectrumMatchingOptimizer(**opt_params, seed=args.seed)
     model = optimizer.model
+
+    if args.verify_grad:
+        # Freezing the model stops d(loss)/d(weight) being accumulated; it must NOT
+        # change d(loss)/d(settings), which is what L-BFGS / RAdam / SGLD consume.
+        def settings_grad():
+            params = [torch.tensor(float(p), device=device, requires_grad=True)
+                      for p in settings_row]
+            loss = optimizer._compute_mse(
+                optimizer._sample_spectrum(torch.stack(params).unsqueeze(0)))
+            loss.backward()
+            return loss.item(), [float(p.grad) for p in params]
+
+        set_model_grad(model, False)
+        loss_f, g_f = settings_grad()
+        set_model_grad(model, True)
+        loss_t, g_t = settings_grad()
+        set_model_grad(model, False)
+
+        print("\nSettings-gradient equivalence (frozen vs trainable model):")
+        print(f"  loss      frozen={loss_f:.10e}  trainable={loss_t:.10e}  "
+              f"identical={loss_f == loss_t}")
+        for name, a_, b_ in zip(('dL/dE', 'dL/dP', 'dL/dt'), g_f, g_t):
+            print(f"  {name}   frozen={a_:+.10e}  trainable={b_:+.10e}  "
+                  f"abs diff={abs(a_ - b_):.3e}")
+        print("  -> L-BFGS / RAdam / SGLD consume exactly these three numbers.")
+        raise SystemExit(0)
     results = {'config': {
         'device': str(device), 'num_steps': args.num_steps,
         'grad_batch': opt_params['batch_size'], 'gen_batch': args.batch_size,
@@ -214,10 +242,11 @@ def main():
         return s
 
     # --- gradient path -------------------------------------------------------
-    set_model_grad(model, True)
+    # SpectrumMatchingOptimizer._init_model freezes the model (only the settings
+    # are optimized), so the state we inherit here IS the production path.
     grad = bench('gradient_eval',
                  make_gradient_fn(optimizer, settings_row, backward=True),
-                 'sample + MSE + backward (as Adam/L-BFGS/SGLD do)')
+                 'sample + MSE + backward (production: model frozen)')
     fwd_graph = bench('forward_with_graph',
                       make_gradient_fn(optimizer, settings_row, backward=False),
                       'forward building the autograd graph, no backward')
@@ -225,12 +254,13 @@ def main():
                        make_forward_nograd_fn(optimizer, settings_row),
                        'forward under no_grad (Bayesian objective)')
 
-    # Model parameters currently receive gradients too - nothing freezes them.
-    set_model_grad(model, False)
-    grad_frozen = bench('gradient_eval_frozen_model',
-                        make_gradient_fn(optimizer, settings_row, backward=True),
-                        'same, but model parameters requires_grad=False')
+    # Reference point: cost if the model parameters were left trainable, i.e. also
+    # accumulating d(loss)/d(weight) that nothing reads (behaviour before freezing).
     set_model_grad(model, True)
+    grad_trainable = bench('gradient_eval_trainable_model',
+                           make_gradient_fn(optimizer, settings_row, backward=True),
+                           'same, but model parameters requires_grad=True')
+    set_model_grad(model, False)   # restore the production state
 
     # --- inference batch generation -----------------------------------------
     gen = bench('batch_generation',
@@ -253,9 +283,10 @@ def main():
     print(f"  backward alone                  {fmt(bwd)} "
           f"({bwd / grad['median'] * 100:.0f}% of a gradient evaluation)")
     print(f"  autograd-graph overhead on fwd  {fmt(fwd_graph['median'] - fwd_nograd['median'])}")
-    saving = grad['median'] - grad_frozen['median']
+    saving = grad_trainable['median'] - grad['median']
     print(f"  freezing model params saves     {fmt(saving)} "
-          f"({saving / grad['median'] * 100:+.0f}%)")
+          f"({saving / grad_trainable['median'] * 100:.0f}% vs trainable), and "
+          f"{grad_trainable['peak_mem_mb'] - grad['peak_mem_mb']:.0f} MiB")
     print(f"  gradient eval / naive per step  {fmt(grad['median'] / args.num_steps)} "
           f"(= total / {args.num_steps}; see the sweep for the true marginal cost)")
     print(f"  batch generation per spectrum   {fmt(gen['median'] / args.batch_size)}")
