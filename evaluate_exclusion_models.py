@@ -28,6 +28,11 @@ CONFIG = {
     # evaluated for every exclusion model; results land in cfg<c>_steps<s>/.
     'cfg_scales': [3.0],
     'num_steps_list': [18],
+    # Generated samples per experiment. None -> match the real shot count.
+    # Distributional metrics (PIT, CRPS, quantiles) want many more generated
+    # samples than real shots, so the reference distribution is not itself
+    # noise-limited; 500-1000 is a good range.
+    'n_generated': None,
     'results_dir': 'exclusion_evaluation_results'
 }
 
@@ -585,11 +590,12 @@ def evaluate_all_exclusion_models(cfg_scales=None, num_steps_list=None):
                         for steps in num_steps_list}
 
             for cfg_scale, num_steps in combos:
+                n_gen = CONFIG.get('n_generated') or n_original_samples
                 print(f"  [CFG={cfg_scale}, steps={num_steps}] generating "
-                      f"{n_original_samples} samples...")
+                      f"{n_gen} samples ({n_original_samples} real shots)...")
                 generated_spectra = sample_spectra_for_experiment(
                     model, samplers[num_steps], experiment_settings,
-                    n_original_samples, CONFIG, cfg_scale
+                    n_gen, CONFIG, cfg_scale
                 )
 
                 # transform_vector() in the sampler de-normalizes with a hardcoded
@@ -623,6 +629,7 @@ def evaluate_all_exclusion_models(cfg_scales=None, num_steps_list=None):
                     'num_steps': num_steps,
                     'experiment_settings': experiment_settings,
                     'n_samples': n_original_samples,
+                    'n_generated': len(generated_spectra),
                     'max_intensity': max_intensity,
                     'sigma_data': sigma_data,
                     'avg_wasserstein_distance': avg_wasserstein,
@@ -694,6 +701,7 @@ def run_comprehensive_evaluation(cfg_scales=None, num_steps_list=None):
             'P': result['experiment_settings'][1], 
             'ms': result['experiment_settings'][2],
             'n_samples': result['n_samples'],
+            'n_generated': result['n_generated'],
             'max_intensity': result['max_intensity'],
             'sigma_data': result['sigma_data'],
             'avg_wasserstein_distance': result['avg_wasserstein_distance'],
@@ -780,8 +788,15 @@ if __name__ == "__main__":
         '--num-steps', type=int, nargs='+', default=None, metavar='S',
         help=f"Sampling step counts to evaluate (default {CONFIG['num_steps_list']})",
     )
+    parser.add_argument(
+        '--n-generated', type=int, default=None, metavar='N',
+        help='Generated samples per experiment (default: match the real shot count). '
+             'Use 500-1000 for distributional metrics.',
+    )
     args = parser.parse_args()
 
+    if args.n_generated:
+        CONFIG['n_generated'] = args.n_generated
     cfg_scales = args.cfg_scales if args.cfg_scales else CONFIG['cfg_scales']
     num_steps_list = args.num_steps if args.num_steps else CONFIG['num_steps_list']
 
