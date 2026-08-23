@@ -171,6 +171,8 @@ def main():
     parser.add_argument('--json', default=None, help='Write results to this JSON file')
     parser.add_argument('--verify-grad', action='store_true',
                         help='Check the settings gradient is unchanged by freezing the model')
+    parser.add_argument('--verify-repeats', type=int, default=3,
+                        help='Repeats per configuration when establishing the noise floor')
     args = parser.parse_args()
 
     settings_row = [float(v) for v in args.settings.split(',')]
@@ -199,29 +201,54 @@ def main():
     model = optimizer.model
 
     if args.verify_grad:
-        # Freezing the model stops d(loss)/d(weight) being accumulated; it must NOT
-        # change d(loss)/d(settings), which is what L-BFGS / RAdam / SGLD consume.
+        # Does freezing the model change d(loss)/d(settings)?  Repeating each
+        # configuration establishes the run-to-run noise floor first: GPU kernels
+        # are not bit-reproducible, so a frozen-vs-trainable difference only means
+        # something if it exceeds the spread seen WITHIN each configuration.
         def settings_grad():
             params = [torch.tensor(float(p), device=device, requires_grad=True)
                       for p in settings_row]
             loss = optimizer._compute_mse(
                 optimizer._sample_spectrum(torch.stack(params).unsqueeze(0)))
             loss.backward()
-            return loss.item(), [float(p.grad) for p in params]
+            return [loss.item()] + [float(p.grad) for p in params]
 
+        reps = max(args.verify_repeats, 2)
         set_model_grad(model, False)
-        loss_f, g_f = settings_grad()
+        frozen = [settings_grad() for _ in range(reps)]
         set_model_grad(model, True)
-        loss_t, g_t = settings_grad()
-        set_model_grad(model, False)
+        trainable = [settings_grad() for _ in range(reps)]
+        set_model_grad(model, True)    # restore the production state
 
-        print("\nSettings-gradient equivalence (frozen vs trainable model):")
-        print(f"  loss      frozen={loss_f:.10e}  trainable={loss_t:.10e}  "
-              f"identical={loss_f == loss_t}")
-        for name, a_, b_ in zip(('dL/dE', 'dL/dP', 'dL/dt'), g_f, g_t):
-            print(f"  {name}   frozen={a_:+.10e}  trainable={b_:+.10e}  "
-                  f"abs diff={abs(a_ - b_):.3e}")
-        print("  -> L-BFGS / RAdam / SGLD consume exactly these three numbers.")
+        names = ('loss', 'dL/dE', 'dL/dP', 'dL/dt')
+        print(f"\nSettings-gradient equivalence, {reps} repeats per configuration")
+        print("(within-config spread = GPU run-to-run noise floor; the between-config")
+        print(" difference is only meaningful if it is larger)")
+        print(f"\n{'quantity':<9}{'median frozen':>17}{'within frozen':>15}"
+              f"{'within train':>14}{'between':>12}{'verdict':>14}")
+        print("-" * 81)
+        verdicts = {}
+        for i, name in enumerate(names):
+            fv = sorted(r[i] for r in frozen)
+            tv = sorted(r[i] for r in trainable)
+            spread_f, spread_t = fv[-1] - fv[0], tv[-1] - tv[0]
+            med_f, med_t = fv[len(fv) // 2], tv[len(tv) // 2]
+            between = abs(med_f - med_t)
+            noise = max(abs(spread_f), abs(spread_t))
+            ok = between <= noise if noise > 0 else between == 0
+            verdicts[name] = ok
+            print(f"{name:<9}{med_f:>17.6e}{abs(spread_f):>15.2e}{abs(spread_t):>14.2e}"
+                  f"{between:>12.2e}{'within noise' if ok else 'EXCEEDS':>14}")
+        print("-" * 81)
+        if all(verdicts.values()):
+            print("All quantities differ by no more than the run-to-run noise floor:")
+            print("freezing has no measurable effect on the gradients the optimizers use.")
+        else:
+            print("Some quantity exceeds the noise floor - inspect before relying on the")
+            print("freeze; rerun with more --verify-repeats to firm up the noise estimate.")
+        rel = [abs(sorted(r[i] for r in frozen)[reps // 2]) for i in range(1, 4)]
+        print(f"\nFor scale: the optimizer already tolerates ~7e-4 relative noise between")
+        print(f"batched and sequential evaluation (measured in plot_loss_landscape.py).")
         raise SystemExit(0)
     results = {'config': {
         'device': str(device), 'num_steps': args.num_steps,
@@ -242,11 +269,10 @@ def main():
         return s
 
     # --- gradient path -------------------------------------------------------
-    # SpectrumMatchingOptimizer._init_model freezes the model (only the settings
-    # are optimized), so the state we inherit here IS the production path.
+    set_model_grad(model, True)
     grad = bench('gradient_eval',
                  make_gradient_fn(optimizer, settings_row, backward=True),
-                 'sample + MSE + backward (production: model frozen)')
+                 'sample + MSE + backward (as Adam/L-BFGS/SGLD do)')
     fwd_graph = bench('forward_with_graph',
                       make_gradient_fn(optimizer, settings_row, backward=False),
                       'forward building the autograd graph, no backward')
@@ -254,13 +280,13 @@ def main():
                        make_forward_nograd_fn(optimizer, settings_row),
                        'forward under no_grad (Bayesian objective)')
 
-    # Reference point: cost if the model parameters were left trainable, i.e. also
-    # accumulating d(loss)/d(weight) that nothing reads (behaviour before freezing).
+    # Reference point: the model's own parameters also receive gradients that
+    # nothing reads. This measures what freezing them would save (not applied).
+    set_model_grad(model, False)
+    grad_frozen = bench('gradient_eval_frozen_model',
+                        make_gradient_fn(optimizer, settings_row, backward=True),
+                        'same, but model parameters requires_grad=False')
     set_model_grad(model, True)
-    grad_trainable = bench('gradient_eval_trainable_model',
-                           make_gradient_fn(optimizer, settings_row, backward=True),
-                           'same, but model parameters requires_grad=True')
-    set_model_grad(model, False)   # restore the production state
 
     # --- inference batch generation -----------------------------------------
     gen = bench('batch_generation',
@@ -283,10 +309,10 @@ def main():
     print(f"  backward alone                  {fmt(bwd)} "
           f"({bwd / grad['median'] * 100:.0f}% of a gradient evaluation)")
     print(f"  autograd-graph overhead on fwd  {fmt(fwd_graph['median'] - fwd_nograd['median'])}")
-    saving = grad_trainable['median'] - grad['median']
-    print(f"  freezing model params saves     {fmt(saving)} "
-          f"({saving / grad_trainable['median'] * 100:.0f}% vs trainable), and "
-          f"{grad_trainable['peak_mem_mb'] - grad['peak_mem_mb']:.0f} MiB")
+    saving = grad['median'] - grad_frozen['median']
+    print(f"  freezing model params would save{fmt(saving):>10} "
+          f"({saving / grad['median'] * 100:.0f}%) and "
+          f"{grad['peak_mem_mb'] - grad_frozen['peak_mem_mb']:.0f} MiB (NOT applied)")
     print(f"  gradient eval / naive per step  {fmt(grad['median'] / args.num_steps)} "
           f"(= total / {args.num_steps}; see the sweep for the true marginal cost)")
     print(f"  batch generation per spectrum   {fmt(gen['median'] / args.batch_size)}")
