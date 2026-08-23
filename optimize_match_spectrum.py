@@ -113,6 +113,12 @@ DEFAULT_CONFIG = {
         'smooth_kernel_size': 9,
         'smooth_sigma': 2.0,
         'normalize_spectrum': False,
+        # Objective: 'mse' matches target_spectrum_csv; the others ignore its
+        # intensities (the CSV still supplies the energy axis) and MAXIMIZE a
+        # beam-quality figure of merit instead.
+        'objective': 'mse',
+        'energy_power': 1.0,
+        'energy_min': 0.0,
     },
     'approaches': {
         'bayesian_only': {'label': 'Bayesian Only', 'stages': [
@@ -164,6 +170,11 @@ DEFAULT_CONFIG = {
             {'method': 'lbfgs', 'n_steps': 50, 'lr': 2.0}]},
     },
 }
+
+
+# Objectives that are maximized rather than minimized. The optimizers always
+# minimize, so _compute_objective returns the negated figure of merit for these.
+MAXIMIZE_OBJECTIVES = ('beam_energy', 'mean_energy')
 
 
 def deep_merge(base, override):
@@ -306,8 +317,9 @@ class SpectrumMatchingOptimizer:
         if seed is not None:
             set_seed(seed)
         
-        # Load target spectrum
+        # Load target spectrum (also supplies the energy axis)
         self._load_target_spectrum(target_spectrum_csv)
+        self._init_objective()
         
         # Random starting parameters
         self.start_params = [
@@ -367,11 +379,57 @@ class SpectrumMatchingOptimizer:
         )
         return x.squeeze(1).mean(dim=0)
 
+    def _init_objective(self):
+        """Prepare the energy axis used by the beam-quality objectives."""
+        self.maximize = self.objective in MAXIMIZE_OBJECTIVES
+        if self.objective == 'mse':
+            return
+        if self.objective not in MAXIMIZE_OBJECTIVES:
+            raise ValueError(f"Unknown objective {self.objective!r}; expected 'mse' or "
+                             f"one of {MAXIMIZE_OBJECTIVES}")
+        # The stored axis runs high -> low energy; flip to ascending so the
+        # trapezoidal integral comes out positive.
+        energy = self.target_energy_axis
+        self._energy_flip = bool(energy[0] > energy[-1])
+        e_asc = torch.flip(energy, dims=[0]) if self._energy_flip else energy
+        self._energy_asc = e_asc
+        # Optional low-energy cut, e.g. to exclude the noisy tail.
+        self._energy_mask = (e_asc >= self.energy_min).to(e_asc.dtype)
+        print(f"  Objective '{self.objective}' (maximized): energy^{self.energy_power:g} "
+              f"weighting over {float(e_asc.min()):.2f}-{float(e_asc.max()):.2f} MeV"
+              + (f", cut below {self.energy_min:g} MeV" if self.energy_min > 0 else ""))
+
+    def _integrate(self, y, weight):
+        """Trapezoidal integral over the true (non-uniform) energy axis.
+
+        The spectra are densities (per MeV) on a biexponential axis whose bin
+        widths span ~190x, so a plain bin sum would badly over-weight the
+        low-energy end.
+        """
+        trapz = getattr(torch, 'trapezoid', None) or torch.trapz
+        return trapz(y * weight, self._energy_asc)
+
+    def _compute_objective(self, spectrum):
+        """Objective to MINIMIZE (maximized figures of merit are negated)."""
+        if self.objective == 'mse':
+            if self.normalize_spectrum:
+                spectrum = (spectrum - spectrum.min()) / (spectrum.max() - spectrum.min() + 1e-8)
+            return torch.mean((spectrum - self.target_spectrum) ** 2)
+
+        y = torch.flip(spectrum, dims=[0]) if self._energy_flip else spectrum
+        mask = self._energy_mask
+        weighted = self._integrate(y, mask * self._energy_asc ** self.energy_power)
+
+        if self.objective == 'beam_energy':
+            # int I(E) E^p dE - rewards both charge and energy
+            return -weighted
+        # 'mean_energy': int I E^p dE / int I dE - energy per unit charge
+        charge = self._integrate(y, mask)
+        return -(weighted / (charge + 1e-12))
+
     def _compute_mse(self, spectrum):
-        """Compute MSE between generated and target spectrum."""
-        if self.normalize_spectrum:
-            spectrum = (spectrum - spectrum.min()) / (spectrum.max() - spectrum.min() + 1e-8)
-        return torch.mean((spectrum - self.target_spectrum) ** 2)
+        """Backwards-compatible alias for _compute_objective."""
+        return self._compute_objective(spectrum)
 
     def _log_step(self, phase, step, params, mse):
         """Log optimization step."""

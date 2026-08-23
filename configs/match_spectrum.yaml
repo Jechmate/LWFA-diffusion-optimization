@@ -37,6 +37,13 @@ optimizer:
   smooth_kernel_size: 9
   smooth_sigma: 2.0
   normalize_spectrum: false
+  # Objective: 'mse' matches target_spectrum_csv; 'beam_energy' maximizes
+  # int I(E) E^p dE (charge x energy) and 'mean_energy' maximizes
+  # int I E^p dE / int I dE (energy per unit charge). Both ignore the target's
+  # intensities but still take the energy axis from that CSV.
+  objective: mse
+  energy_power: 1.0
+  energy_min: 0.0
 
 # Each approach is a list of stages run in order. The first stage starts from
 # random parameters; every later stage starts from the best parameters found so

@@ -151,15 +151,17 @@ def scan_grid(optimizer, grids, fixed=None, batch_points=8):
 # PLOTTING
 # =============================================================================
 
-def reduce_pair(Z, xa, ya, reduce, center_idx):
+def reduce_pair(Z, xa, ya, reduce, center_idx, maximize=False):
     """Collapse the cube Z[i_E, j_P, k_T] onto the (xa, ya) plane.
 
     Returns an array indexed [y, x], ready for pcolormesh(x_vals, y_vals, ...).
+    The 'min' reduction means "best achievable over the third parameter", so it
+    becomes a max-projection when the objective is maximized.
     """
     other = [a for a in AXES if a not in (xa, ya)][0]
     axis = AXES.index(other)
     if reduce == 'min':
-        plane = Z.min(axis=axis)
+        plane = Z.max(axis=axis) if maximize else Z.min(axis=axis)
     else:  # slice through the centre value
         plane = np.take(Z, center_idx[other], axis=axis)
     # `plane` is indexed by the two remaining axes in AXES order; orient as [y, x]
@@ -203,7 +205,8 @@ def draw_panel(ax, x_vals, y_vals, plane, xa, ya, linear=False, mark=None,
     return mesh
 
 
-def plot_pairs(grids, Z, centre, output, linear=False, overlay_pts=None, reduces=('slice', 'min')):
+def plot_pairs(grids, Z, centre, output, linear=False, overlay_pts=None,
+               reduces=('slice', 'min'), maximize=False, value_label='Loss (MSE)'):
     """Plot all three parameter pairs, one row per reduction."""
     center_idx = {a: int(np.argmin(np.abs(grids[a] - centre[a]))) for a in AXES}
 
@@ -211,23 +214,25 @@ def plot_pairs(grids, Z, centre, output, linear=False, overlay_pts=None, reduces
     for r, reduce in enumerate(reduces):
         for c, (xa, ya) in enumerate(PAIRS):
             ax = axes[r][c]
-            plane = reduce_pair(Z, xa, ya, reduce, center_idx)
+            plane = reduce_pair(Z, xa, ya, reduce, center_idx, maximize=maximize)
             other = [a for a in AXES if a not in (xa, ya)][0]
             overlay = ([(p[AXES.index(xa)], p[AXES.index(ya)]) for p in overlay_pts]
                        if overlay_pts else None)
             mesh = draw_panel(ax, grids[xa], grids[ya], plane, xa, ya, linear=linear,
                               mark=(centre[xa], centre[ya]), overlay=overlay)
-            fig.colorbar(mesh, ax=ax).set_label('Loss (MSE)')
+            fig.colorbar(mesh, ax=ax).set_label(value_label)
             if reduce == 'min':
-                ax.set_title(f'min over {LABELS[other].split(" — ")[0]}')
+                ax.set_title(f'{"max" if maximize else "min"} over '
+                             f'{LABELS[other].split(" — ")[0]}')
             else:
                 ax.set_title(f'{LABELS[other].split(" — ")[0]} = {grids[other][center_idx[other]]:.3g} (slice)')
             if r == 0 and c == 0:
                 ax.legend(loc='upper left', fontsize=7)
 
-    fig.suptitle('Loss landscape over parameter pairs '
-                 '(top: slice through optimum, bottom: min-projection)'
-                 if len(reduces) > 1 else 'Loss landscape over parameter pairs', fontsize=14)
+    proj = 'max' if maximize else 'min'
+    fig.suptitle(f'{value_label} over parameter pairs '
+                 f'(top: slice through optimum, bottom: {proj}-projection)'
+                 if len(reduces) > 1 else f'{value_label} over parameter pairs', fontsize=14)
     plt.tight_layout()
     plt.savefig(output, dpi=300, bbox_inches='tight')
     print(f"Saved figure: {output}")
@@ -235,7 +240,8 @@ def plot_pairs(grids, Z, centre, output, linear=False, overlay_pts=None, reduces
 
 
 def plot_single_plane(x_vals, y_vals, plane, xa, ya, third_name, third_val, output,
-                      centre=None, linear=False, overlay_pts=None):
+                      centre=None, linear=False, overlay_pts=None,
+                      value_label='Loss (MSE)'):
     """Plot one (x, y) plane - the 2D mode."""
     fig, ax = plt.subplots(figsize=(9, 7))
     overlay = ([(p[AXES.index(xa)], p[AXES.index(ya)]) for p in overlay_pts]
@@ -243,7 +249,7 @@ def plot_single_plane(x_vals, y_vals, plane, xa, ya, third_name, third_val, outp
     mark = (centre[xa], centre[ya]) if centre else None
     mesh = draw_panel(ax, x_vals, y_vals, plane, xa, ya, linear=linear,
                       mark=mark, overlay=overlay)
-    fig.colorbar(mesh, ax=ax).set_label('Loss (MSE)')
+    fig.colorbar(mesh, ax=ax).set_label(value_label)
     ax.set_title(f'Loss landscape L({xa}, {ya}) at {third_name} = {third_val:g}')
     ax.legend(loc='upper left', fontsize=8)
     plt.tight_layout()
@@ -282,12 +288,12 @@ def load_recovered_optima(results_path):
     return points
 
 
-def report_minimum(grids, Z):
-    """Print where the scanned minimum sits."""
-    idx = np.unravel_index(np.argmin(Z), Z.shape)
+def report_minimum(grids, Z, maximize=False, value_label='L'):
+    """Print where the scanned optimum sits."""
+    idx = np.unravel_index(np.argmax(Z) if maximize else np.argmin(Z), Z.shape)
     scanned = [a for a in AXES if a in grids]
     loc = ", ".join(f"{a}={grids[a][i]:.2f}" for a, i in zip(scanned, idx))
-    print(f"Grid min: L={Z[idx]:.6g} at {loc}")
+    print(f"Grid {'max' if maximize else 'min'}: {value_label}={Z[idx]:.6g} at {loc}")
 
 
 def self_test():
@@ -367,9 +373,12 @@ def main():
         Z = data['Z']
         if Z.ndim == 3:
             grids = {a: data[a] for a in AXES}
-            report_minimum(grids, Z)
+            mx = bool(data['maximize']) if 'maximize' in data.files else False
+            lbl = str(data['objective']) if 'objective' in data.files else 'Loss (MSE)'
+            report_minimum(grids, Z, maximize=mx, value_label=lbl)
             plot_pairs(grids, Z, centre, args.output or 'loss_landscape_pairs.png',
-                       linear=args.linear_color, overlay_pts=overlay_pts)
+                       linear=args.linear_color, overlay_pts=overlay_pts,
+                       maximize=mx, value_label=lbl)
         else:
             plot_single_plane(data['E'], data['P'], Z, 'E', 'P', 't_open',
                               float(data['t_open']), args.output or 'loss_landscape_EP.png',
@@ -388,6 +397,17 @@ def main():
     print(f"Target: {opt_params['target_spectrum_csv']}  |  device: {opt_params['device']}")
     optimizer = SpectrumMatchingOptimizer(**opt_params, seed=args.seed)
 
+    # Maximized objectives are returned negated (the optimizers minimize); store
+    # and plot the physical quantity instead, and flip the projection sense.
+    maximize = getattr(optimizer, 'maximize', False)
+    objective = getattr(optimizer, 'objective', 'mse')
+    VALUE_LABELS = {'mse': 'Loss (MSE)',
+                    'beam_energy': r'$\int I(E)\,E^p\,dE$  (charge x energy)',
+                    'mean_energy': r'$\int I E^p dE / \int I dE$  (mean energy)'}
+    value_label = VALUE_LABELS.get(objective, objective)
+    if maximize:
+        print(f"Objective '{objective}' is MAXIMIZED; plotting the figure of merit")
+
     if args.verify_batching:
         ranges = {'E': (args.e_min, args.e_max), 'P': (args.p_min, args.p_max),
                   't_open': (args.t_min, args.t_max)}
@@ -405,13 +425,17 @@ def main():
         print(f"3D scan {resolution}^3 = {resolution**3} points over "
               f"E[{args.e_min},{args.e_max}] P[{args.p_min},{args.p_max}] t[{args.t_min},{args.t_max}]")
         Z = scan_grid(optimizer, grids, batch_points=args.batch_points)
-        report_minimum(grids, Z)
+        if maximize:
+            Z = -Z
+        report_minimum(grids, Z, maximize=maximize, value_label=value_label.split()[0])
 
         output = args.output or 'loss_landscape_pairs.png'
         npz = os.path.splitext(output)[0] + '.npz'
-        np.savez(npz, Z=Z, target=opt_params['target_spectrum_csv'], **grids)
+        np.savez(npz, Z=Z, target=opt_params['target_spectrum_csv'],
+                 objective=objective, maximize=maximize, **grids)
         print(f"Saved grid: {npz}")
-        plot_pairs(grids, Z, centre, output, linear=args.linear_color, overlay_pts=overlay_pts)
+        plot_pairs(grids, Z, centre, output, linear=args.linear_color,
+                   overlay_pts=overlay_pts, maximize=maximize, value_label=value_label)
     else:
         grids = {
             'E': np.linspace(args.e_min, args.e_max, resolution),
@@ -420,7 +444,9 @@ def main():
         print(f"2D scan {resolution}x{resolution} = {resolution**2} points at t_open={args.t_open}")
         Z = scan_grid(optimizer, grids, fixed={'t_open': args.t_open},
                       batch_points=args.batch_points)   # indexed [E, P]
-        report_minimum(grids, Z)
+        if maximize:
+            Z = -Z
+        report_minimum(grids, Z, maximize=maximize, value_label=value_label.split()[0])
 
         output = args.output or 'loss_landscape_EP.png'
         npz = os.path.splitext(output)[0] + '.npz'
@@ -428,7 +454,8 @@ def main():
                  target=opt_params['target_spectrum_csv'])
         print(f"Saved grid: {npz}")
         plot_single_plane(grids['E'], grids['P'], Z.T, 'E', 'P', 't_open', args.t_open,
-                          output, centre=centre, linear=args.linear_color, overlay_pts=overlay_pts)
+                          output, centre=centre, linear=args.linear_color,
+                          overlay_pts=overlay_pts, value_label=value_label)
 
 
 if __name__ == '__main__':

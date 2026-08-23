@@ -1,0 +1,11 @@
+{
+  "model_path": "models/edm_4kepochs/ema_ckpt_final.pt",
+  "device": "cuda:1",
+  "target_spectrum_csv": "avg_spectrum_45_25_20.csv",
+  "optimizer": {
+    "normalize_spectrum": false,
+    "objective": "beam_energy",
+    "energy_power": 1.0,
+    "energy_min": 0.0
+  }
+}
