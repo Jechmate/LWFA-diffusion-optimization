@@ -55,6 +55,10 @@ CONFIG = {
 }
 QUANTILES = [0.05, 0.25, 0.50, 0.75, 0.95]
 
+# np.trapezoid only exists from NumPy 2.0; np.trapz is deprecated there but still
+# present. Fall back so this runs on either.
+_trapz = getattr(np, 'trapezoid', None) or np.trapz
+
 
 # =============================================================================
 # LOADING
@@ -139,10 +143,10 @@ def scalar_summaries(spectra, energy):
     order = np.argsort(energy)
     e = energy[order]
     y = spectra[:, order]
-    charge = np.trapezoid(y, e, axis=1)
-    weighted = np.trapezoid(y * e, e, axis=1)
+    charge = _trapz(y, e, axis=1)
+    weighted = _trapz(y * e, e, axis=1)
     hi = e >= 20.0
-    tail = np.trapezoid(y[:, hi], e[hi], axis=1) if hi.sum() > 1 else np.zeros(len(y))
+    tail = _trapz(y[:, hi], e[hi], axis=1) if hi.sum() > 1 else np.zeros(len(y))
     return {
         'total_charge': charge,
         'mean_energy': np.divide(weighted, charge, out=np.zeros_like(charge),
