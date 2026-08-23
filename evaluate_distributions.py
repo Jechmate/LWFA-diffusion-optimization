@@ -156,6 +156,85 @@ def scalar_summaries(spectra, energy):
     }
 
 
+def wasserstein_per_experiment(real, generated, min_avg_intensity=0.01):
+    """Per-bin Wasserstein distance, averaged over bins with signal.
+
+    Replicates calculate_wasserstein_distance_1d_spectra in
+    evaluate_exclusion_models.py exactly, so the numbers stay comparable: a bin is
+    skipped only when BOTH the real and generated ensemble means fall below
+    `min_avg_intensity`, and the reported value is the mean over included bins.
+    """
+    from scipy import stats
+
+    n_bins = min(real.shape[1], generated.shape[1])
+    distances = []
+    for b in range(n_bins):
+        rb, gb = real[:, b], generated[:, b]
+        if rb.mean() < min_avg_intensity and gb.mean() < min_avg_intensity:
+            continue
+        distances.append(stats.wasserstein_distance(rb, gb))
+    avg = float(np.mean(distances)) if distances else float('nan')
+    return avg, len(distances), n_bins
+
+
+def load_settings(params_file):
+    """experiment -> (E, P, ms) from params.csv."""
+    if not os.path.exists(params_file):
+        return {}
+    df = pd.read_csv(params_file)
+    return {int(r['experiment']): (float(r['E']), float(r['P']), float(r['ms']))
+            for _, r in df.iterrows()}
+
+
+def export_wasserstein(args):
+    """Per-experiment Wasserstein table, recomputed from the saved ensembles."""
+    settings = load_settings(CONFIG['params_file'])
+    rows = []
+    for cfg_scale in args.cfg_scales:
+        pairs = collect_pairs(args.results_dir, args.data_dir, cfg_scale,
+                              args.num_steps, CONFIG['resolution'])
+        if not pairs:
+            print(f"No saved ensembles for CFG={cfg_scale}, steps={args.num_steps}")
+            continue
+        for p in pairs:
+            real, gen = p['real'], p['generated']
+            avg, n_incl, n_tot = wasserstein_per_experiment(real, gen)
+            E, P, ms = settings.get(p['experiment'], (np.nan,) * 3)
+            rows.append({
+                'cfg_scale': cfg_scale, 'num_steps': args.num_steps,
+                'experiment': p['experiment'], 'E': E, 'P': P, 't_open': ms,
+                'n_real': len(real), 'n_generated': len(gen),
+                'avg_wasserstein': avg,
+                'n_bins_included': n_incl, 'n_bins_total': n_tot,
+                'real_mean_intensity': float(real.mean()),
+                'gen_mean_intensity': float(gen.mean()),
+            })
+        print(f"  CFG={cfg_scale}: {len(pairs)} experiments")
+
+    if not rows:
+        raise SystemExit('No ensembles found - run evaluate_exclusion_models.py first.')
+
+    df = pd.DataFrame(rows).sort_values(['cfg_scale', 'experiment'])
+    df.to_csv(args.export_wasserstein, index=False)
+
+    print("\n" + "=" * 78)
+    print("WASSERSTEIN DISTANCE, LEAVE-ONE-OUT CROSS-VALIDATION")
+    print("=" * 78)
+    print(df.to_string(index=False, float_format=lambda v: f"{v:.4g}"))
+    print("\n" + "-" * 78)
+    print(f"{'cfg':>6}{'n_exp':>7}{'mean':>12}{'std':>12}{'median':>12}{'min':>12}{'max':>12}")
+    for cfg_scale, g in df.groupby('cfg_scale'):
+        w = g['avg_wasserstein']
+        print(f"{cfg_scale:>6}{len(g):>7}{w.mean():>12.4g}{w.std():>12.4g}"
+              f"{w.median():>12.4g}{w.min():>12.4g}{w.max():>12.4g}")
+    print("-" * 78)
+    worst = df.loc[df['avg_wasserstein'].idxmax()]
+    print(f"Worst experiment: {int(worst['experiment'])} "
+          f"(E={worst['E']:g}, P={worst['P']:g}, t={worst['t_open']:g}) "
+          f"at CFG={worst['cfg_scale']:g}, W={worst['avg_wasserstein']:.4g}")
+    print(f"Saved: {args.export_wasserstein}")
+
+
 def ks_statistic(a, b):
     """Two-sample Kolmogorov-Smirnov statistic (no scipy dependency)."""
     a, b = np.sort(a), np.sort(b)
@@ -335,7 +414,15 @@ def main():
                         help='Highest quantile treated as measurable')
     parser.add_argument('--output-prefix', default='distribution_eval')
     parser.add_argument('--csv', default='distribution_eval.csv')
+    parser.add_argument('--export-wasserstein', nargs='?', const='wasserstein_loo.csv',
+                        default=None, metavar='PATH',
+                        help='Write the per-experiment Wasserstein table (recomputed '
+                             'from the saved ensembles) and exit')
     args = parser.parse_args()
+
+    if args.export_wasserstein:
+        export_wasserstein(args)
+        return
 
     trend, frames = {}, []
     for cfg_scale in args.cfg_scales:

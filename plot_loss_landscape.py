@@ -44,7 +44,7 @@ AXES = ['E', 'P', 't_open']
 LABELS = {
     'E': 'E — laser energy',
     'P': 'P — pressure [bar]',
-    't_open': 't_open — acquisition time [ms]',
+    't_open': 't_open — opening time [ms]',
 }
 # Reference regions for context rectangles (optimizer bounds / training data range).
 OPT_BOUNDS = {'E': (5.0, 50.0), 'P': (1.0, 50.0), 't_open': (5.0, 100.0)}
@@ -202,12 +202,12 @@ def draw_panel(ax, x_vals, y_vals, plane, xa, ya, linear=False, mark=None,
                    zorder=5, label=f'Recovered (n={len(overlay)})')
 
     if context:
-        for region, colour, name in ((OPT_BOUNDS, 'white', 'bounds'),
-                                     (TRAIN_RANGE, 'cyan', 'training')):
+        for region, colour, width, name in ((OPT_BOUNDS, 'white', 1.0, 'bounds'),
+                                            (TRAIN_RANGE, 'black', 1.4, 'training')):
             x0, x1 = region[xa]
             y0, y1 = region[ya]
             ax.add_patch(plt.Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False,
-                                       edgecolor=colour, linestyle='--', linewidth=1.0))
+                                       edgecolor=colour, linestyle='--', linewidth=width))
             ax.text(x1, y1, f' {name}', color=colour, fontsize=6, va='bottom', ha='left')
 
     ax.set_xlabel(LABELS[xa])
@@ -251,7 +251,9 @@ def plot_pairs(grids, Z, centre, output, linear=False, overlay_pts=None,
                        if overlay_pts else None)
             mesh = draw_panel(ax, grids[xa], grids[ya], plane, xa, ya, linear=linear,
                               mark=(centre[xa], centre[ya]), overlay=overlay, norm=shared)
-            fig.colorbar(mesh, ax=ax).set_label(value_label)
+            if shared is None:
+                # linear mode: each panel self-scales, so it needs its own bar
+                fig.colorbar(mesh, ax=ax).set_label(value_label)
             if reduce == 'min':
                 ax.set_title(f'{"max" if maximize else "min"} over '
                              f'{LABELS[other].split(" — ")[0]}')
@@ -264,7 +266,17 @@ def plot_pairs(grids, Z, centre, output, linear=False, overlay_pts=None,
     fig.suptitle(f'{value_label} over parameter pairs '
                  f'(top: slice through optimum, bottom: {proj}-projection)'
                  if len(reduces) > 1 else f'{value_label} over parameter pairs', fontsize=14)
-    plt.tight_layout()
+
+    if shared is not None:
+        # One colorbar for the whole figure: with a shared norm, six identical bars
+        # would wrongly suggest six different scales. Lay the grid out first -
+        # tight_layout() cannot handle a figure-level colorbar.
+        fig.tight_layout(rect=[0, 0, 0.93, 0.96])
+        cbar = fig.colorbar(mesh, ax=axes, fraction=0.02, pad=0.02)
+        cbar.set_label(value_label, fontsize=11)
+    else:
+        plt.tight_layout()
+
     plt.savefig(output, dpi=300, bbox_inches='tight')
     print(f"Saved figure: {output}")
     plt.close()
