@@ -170,19 +170,31 @@ def reduce_pair(Z, xa, ya, reduce, center_idx, maximize=False):
 
 
 def draw_panel(ax, x_vals, y_vals, plane, xa, ya, linear=False, mark=None,
-               overlay=None, context=True):
-    """Draw one loss-landscape panel."""
-    vmin = max(plane.min(), 1e-12)
-    norm = None if linear else LogNorm(vmin=vmin, vmax=plane.max())
-    mesh = ax.pcolormesh(x_vals, y_vals, plane, shading='auto', cmap='viridis', norm=norm)
+               overlay=None, context=True, norm=None):
+    """Draw one panel. Pass `norm` to share a colour scale across panels.
 
-    levels = (np.linspace(plane.min(), plane.max(), 12) if linear
-              else np.logspace(np.log10(vmin), np.log10(plane.max()), 12))
-    ax.contour(x_vals, y_vals, plane, levels=levels, colors='white', alpha=0.3, linewidths=0.6)
+    Non-positive cells cannot be shown on a log scale; they are masked and drawn
+    in the colormap's "bad" colour (grey), which for the beam objectives means
+    the model produced a degenerate flat spectrum there - no beam at all.
+    """
+    cmap = plt.get_cmap('viridis').copy()
+    cmap.set_bad('#d9d9d9')
+    if norm is None:
+        vmin = max(plane[plane > 0].min() if np.any(plane > 0) else 1e-12, 1e-12)
+        norm = None if linear else LogNorm(vmin=vmin, vmax=plane.max())
+    shown = plane if linear else np.ma.masked_less_equal(plane, 0)
+    mesh = ax.pcolormesh(x_vals, y_vals, shown, shading='auto', cmap=cmap, norm=norm)
+
+    if linear:
+        levels = np.linspace(plane.min(), plane.max(), 12)
+    else:
+        lo, hi = norm.vmin, norm.vmax
+        levels = np.logspace(np.log10(lo), np.log10(hi), 10)
+    ax.contour(x_vals, y_vals, shown, levels=levels, colors='white', alpha=0.3, linewidths=0.6)
 
     if mark is not None:
         ax.plot(mark[0], mark[1], marker='*', markersize=16, color='red',
-                markeredgecolor='black', linestyle='none', label='Target optimum')
+                markeredgecolor='black', linestyle='none', label='Optimum / slice')
 
     if overlay:
         xs, ys = zip(*overlay)
@@ -206,20 +218,39 @@ def draw_panel(ax, x_vals, y_vals, plane, xa, ya, linear=False, mark=None,
 
 
 def plot_pairs(grids, Z, centre, output, linear=False, overlay_pts=None,
-               reduces=('slice', 'min'), maximize=False, value_label='Loss (MSE)'):
+               reduces=('slice', 'min'), maximize=False, value_label='Loss (MSE)',
+               dynamic_range=4):
     """Plot all three parameter pairs, one row per reduction."""
     center_idx = {a: int(np.argmin(np.abs(grids[a] - centre[a]))) for a in AXES}
+
+    # Build every panel first so they can share one colour scale. Without this
+    # each panel self-scales and the rows cannot be compared by eye.
+    planes = {(r, c): reduce_pair(Z, xa, ya, reduce, center_idx, maximize=maximize)
+              for r, reduce in enumerate(reduces)
+              for c, (xa, ya) in enumerate(PAIRS)}
+    allv = np.concatenate([p.ravel() for p in planes.values()])
+    pos = allv[allv > 0]
+    shared = None
+    if not linear and pos.size:
+        vmax = float(pos.max())
+        # Clip the useless low tail: keep `dynamic_range` decades below the peak,
+        # but never below the smallest positive value actually present.
+        vmin = max(float(pos.min()), vmax / 10 ** dynamic_range)
+        shared = LogNorm(vmin=vmin, vmax=vmax)
+        n_bad = int((allv <= 0).sum())
+        print(f"  colour scale: {vmin:.3g} .. {vmax:.3g} ({dynamic_range} decades, shared); "
+              f"{n_bad}/{allv.size} cells non-positive -> grey")
 
     fig, axes = plt.subplots(len(reduces), 3, figsize=(19, 5.6 * len(reduces)), squeeze=False)
     for r, reduce in enumerate(reduces):
         for c, (xa, ya) in enumerate(PAIRS):
             ax = axes[r][c]
-            plane = reduce_pair(Z, xa, ya, reduce, center_idx, maximize=maximize)
+            plane = planes[(r, c)]
             other = [a for a in AXES if a not in (xa, ya)][0]
             overlay = ([(p[AXES.index(xa)], p[AXES.index(ya)]) for p in overlay_pts]
                        if overlay_pts else None)
             mesh = draw_panel(ax, grids[xa], grids[ya], plane, xa, ya, linear=linear,
-                              mark=(centre[xa], centre[ya]), overlay=overlay)
+                              mark=(centre[xa], centre[ya]), overlay=overlay, norm=shared)
             fig.colorbar(mesh, ax=ax).set_label(value_label)
             if reduce == 'min':
                 ax.set_title(f'{"max" if maximize else "min"} over '
@@ -288,6 +319,20 @@ def load_recovered_optima(results_path):
     return points
 
 
+def resolve_centre(spec, grids, Z, maximize):
+    """Marker / slice location: an explicit "E,P,t", or the grid optimum."""
+    if spec not in (None, 'auto'):
+        return dict(zip(AXES, [float(v) for v in spec.split(',')]))
+    idx = np.unravel_index(np.argmax(Z) if maximize else np.argmin(Z), Z.shape)
+    scanned = [a for a in AXES if a in grids]
+    centre = {a: float(grids[a][i]) for a, i in zip(scanned, idx)}
+    for a in AXES:                      # 2d mode leaves one axis unscanned
+        centre.setdefault(a, float(np.mean(grids[a])) if a in grids else 0.0)
+    print("  marker/slice set to the grid optimum: "
+          + ", ".join(f"{a}={centre[a]:.2f}" for a in scanned))
+    return centre
+
+
 def report_minimum(grids, Z, maximize=False, value_label='L'):
     """Print where the scanned optimum sits."""
     idx = np.unravel_index(np.argmax(Z) if maximize else np.argmin(Z), Z.shape)
@@ -343,8 +388,12 @@ def main():
     parser.add_argument('--t-min', type=float, default=5.0)
     parser.add_argument('--t-max', type=float, default=60.0)
     parser.add_argument('--t-open', type=float, default=20.0, help='Fixed t_open in 2d mode')
-    parser.add_argument('--centre', '--center', dest='centre', default='45,25,20',
-                        help='"E,P,t" optimum: marker, and the slice location in 3d mode')
+    parser.add_argument('--centre', '--center', dest='centre', default=None,
+                        help='"E,P,t" marker and slice location, or "auto" for the grid '
+                             'optimum (default: 45,25,20 for the MSE objective, auto '
+                             'for the maximized beam objectives)')
+    parser.add_argument('--dynamic-range', type=float, default=4,
+                        help='Decades below the peak to show on the shared log colour scale')
     parser.add_argument('--batch-points', type=int, default=8,
                         help='Grid points per sampler call (memory/speed knob)')
     parser.add_argument('--seed', type=int, default=42, help='Seed for latent initialization')
@@ -360,8 +409,6 @@ def main():
     if args.self_test:
         raise SystemExit(0 if self_test() else 1)
 
-    centre_vals = [float(v) for v in args.centre.split(',')]
-    centre = dict(zip(AXES, centre_vals))
     overlay_pts = (load_recovered_optima(args.results)
                    if args.results and os.path.exists(args.results) else None)
     if overlay_pts:
@@ -376,10 +423,14 @@ def main():
             mx = bool(data['maximize']) if 'maximize' in data.files else False
             lbl = str(data['objective']) if 'objective' in data.files else 'Loss (MSE)'
             report_minimum(grids, Z, maximize=mx, value_label=lbl)
+            centre = resolve_centre(args.centre if args.centre else ('auto' if mx else '45,25,20'),
+                                    grids, Z, mx)
             plot_pairs(grids, Z, centre, args.output or 'loss_landscape_pairs.png',
                        linear=args.linear_color, overlay_pts=overlay_pts,
-                       maximize=mx, value_label=lbl)
+                       maximize=mx, value_label=lbl, dynamic_range=args.dynamic_range)
         else:
+            g = {'E': data['E'], 'P': data['P']}
+            centre = resolve_centre(args.centre or '45,25,20', g, Z, False)
             plot_single_plane(data['E'], data['P'], Z, 'E', 'P', 't_open',
                               float(data['t_open']), args.output or 'loss_landscape_EP.png',
                               centre=centre, linear=args.linear_color, overlay_pts=overlay_pts)
@@ -434,8 +485,11 @@ def main():
         np.savez(npz, Z=Z, target=opt_params['target_spectrum_csv'],
                  objective=objective, maximize=maximize, **grids)
         print(f"Saved grid: {npz}")
+        centre = resolve_centre(args.centre if args.centre else ('auto' if maximize else '45,25,20'),
+                                grids, Z, maximize)
         plot_pairs(grids, Z, centre, output, linear=args.linear_color,
-                   overlay_pts=overlay_pts, maximize=maximize, value_label=value_label)
+                   overlay_pts=overlay_pts, maximize=maximize, value_label=value_label,
+                   dynamic_range=args.dynamic_range)
     else:
         grids = {
             'E': np.linspace(args.e_min, args.e_max, resolution),
@@ -453,6 +507,8 @@ def main():
         np.savez(npz, Z=Z, E=grids['E'], P=grids['P'], t_open=args.t_open,
                  target=opt_params['target_spectrum_csv'])
         print(f"Saved grid: {npz}")
+        centre = resolve_centre(args.centre if args.centre else ('auto' if maximize else '45,25,20'),
+                                grids, Z, maximize)
         plot_single_plane(grids['E'], grids['P'], Z.T, 'E', 'P', 't_open', args.t_open,
                           output, centre=centre, linear=args.linear_color,
                           overlay_pts=overlay_pts, value_label=value_label)
