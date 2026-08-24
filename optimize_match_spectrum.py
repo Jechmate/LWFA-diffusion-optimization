@@ -94,7 +94,7 @@ DEFAULT_CONFIG = {
         # Approaches run in comparison/extend mode; None -> every approach in
         # DEFAULT_CONFIG['approaches']. Default is the set compared in the paper.
         'approaches': ['bayesian_only', 'adam_only', 'lbfgs_only',
-                       'bayes_adam', 'bayes_lbfgs',
+                       'bayes_adam', 'bayes_lbfgs', 'adam_lbfgs',
                        'bayes_adam_lbfgs', 'bayes_lbfgs_adam'],
         'n_seeds': 10,
         'multi_seed_base': 42,
