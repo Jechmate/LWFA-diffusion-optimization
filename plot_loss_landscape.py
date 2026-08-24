@@ -401,9 +401,8 @@ def main():
     parser.add_argument('--t-max', type=float, default=60.0)
     parser.add_argument('--t-open', type=float, default=20.0, help='Fixed t_open in 2d mode')
     parser.add_argument('--centre', '--center', dest='centre', default=None,
-                        help='"E,P,t" marker and slice location, or "auto" for the grid '
-                             'optimum (default: 45,25,20 for the MSE objective, auto '
-                             'for the maximized beam objectives)')
+                        help='"E,P,t" marker and slice location, or "auto" (default) '
+                             'for the grid optimum')
     parser.add_argument('--dynamic-range', type=float, default=4,
                         help='Decades below the peak to show on the shared log colour scale')
     parser.add_argument('--batch-points', type=int, default=8,
@@ -435,14 +434,13 @@ def main():
             mx = bool(data['maximize']) if 'maximize' in data.files else False
             lbl = str(data['objective']) if 'objective' in data.files else 'Loss (MSE)'
             report_minimum(grids, Z, maximize=mx, value_label=lbl)
-            centre = resolve_centre(args.centre if args.centre else ('auto' if mx else '45,25,20'),
-                                    grids, Z, mx)
+            centre = resolve_centre(args.centre or 'auto', grids, Z, mx)
             plot_pairs(grids, Z, centre, args.output or 'loss_landscape_pairs.png',
                        linear=args.linear_color, overlay_pts=overlay_pts,
                        maximize=mx, value_label=lbl, dynamic_range=args.dynamic_range)
         else:
             g = {'E': data['E'], 'P': data['P']}
-            centre = resolve_centre(args.centre or '45,25,20', g, Z, False)
+            centre = resolve_centre(args.centre or 'auto', g, Z, False)
             plot_single_plane(data['E'], data['P'], Z, 'E', 'P', 't_open',
                               float(data['t_open']), args.output or 'loss_landscape_EP.png',
                               centre=centre, linear=args.linear_color, overlay_pts=overlay_pts)
@@ -497,8 +495,7 @@ def main():
         np.savez(npz, Z=Z, target=opt_params['target_spectrum_csv'],
                  objective=objective, maximize=maximize, **grids)
         print(f"Saved grid: {npz}")
-        centre = resolve_centre(args.centre if args.centre else ('auto' if maximize else '45,25,20'),
-                                grids, Z, maximize)
+        centre = resolve_centre(args.centre or 'auto', grids, Z, maximize)
         plot_pairs(grids, Z, centre, output, linear=args.linear_color,
                    overlay_pts=overlay_pts, maximize=maximize, value_label=value_label,
                    dynamic_range=args.dynamic_range)
@@ -519,8 +516,7 @@ def main():
         np.savez(npz, Z=Z, E=grids['E'], P=grids['P'], t_open=args.t_open,
                  target=opt_params['target_spectrum_csv'])
         print(f"Saved grid: {npz}")
-        centre = resolve_centre(args.centre if args.centre else ('auto' if maximize else '45,25,20'),
-                                grids, Z, maximize)
+        centre = resolve_centre(args.centre or 'auto', grids, Z, maximize)
         plot_single_plane(grids['E'], grids['P'], Z.T, 'E', 'P', 't_open', args.t_open,
                           output, centre=centre, linear=args.linear_color,
                           overlay_pts=overlay_pts, value_label=value_label)
