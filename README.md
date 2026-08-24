@@ -31,13 +31,32 @@ python train_edm.py
 
 Optimisation strategies are declared as stage pipelines in
 `configs/match_spectrum.yaml`; a config only needs to list what it changes.
+Running with no arguments reproduces the strategy comparison from the paper:
+the eight approaches listed below, each across ten seeds.
+
+| approach | stages |
+| --- | --- |
+| `bayesian_only` | BO (100) |
+| `adam_only` | RAdam (100) |
+| `lbfgs_only` | L-BFGS (100) |
+| `bayes_adam` | BO (100) + RAdam (50) |
+| `bayes_lbfgs` | BO (100) + L-BFGS (50) |
+| `adam_lbfgs` | RAdam (50) + L-BFGS (50) |
+| `bayes_adam_lbfgs` | BO (100) + RAdam (50) + L-BFGS (50) |
+| `bayes_lbfgs_adam` | BO (100) + L-BFGS (50) + RAdam (50) |
 
 ```bash
 # Compare optimisation strategies across seeds (Table: strategy comparison)
-python optimize_match_spectrum.py --config configs/comparison_langevin_avg_45_25_20.json
+python optimize_match_spectrum.py
+
+# A subset, or any other defined approach, on demand
+python optimize_match_spectrum.py --approaches bayes_lbfgs_adam bayes_lbfgs
 
 # BO with the surrogate loss landscape as GP prior mean
 python optimize_match_spectrum.py --config configs/comparison_prior_mean.json
+
+# Stochastic-gradient Langevin variants
+python optimize_match_spectrum.py --config configs/comparison_langevin_avg_45_25_20.json
 
 # Objective landscape over the (E, P, t_open) cube (Figure: loss landscape)
 python plot_loss_landscape.py --resolution 25
@@ -49,6 +68,10 @@ python evaluate_distributions.py --export-wasserstein wasserstein_loo.csv
 # Timing and memory per gradient evaluation (Table: hyperparameters)
 python benchmark_timing.py --sweep-steps 1 4 8 18 30
 ```
+
+`configs/match_spectrum.yaml` also defines approaches that are not in the
+default set: the SGD and Langevin/SGLD variants and the surrogate-prior ones.
+Select them with `--approaches` or by setting `run.approaches` in a config.
 
 `plots.ipynb` builds the comparison figures and the LaTeX tables from finished
 runs; `aggregate_results.py` merges results across runs into one CSV.
