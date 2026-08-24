@@ -1,15 +1,61 @@
-*.png
-match_spectrum_*
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------------------
+# Run outputs and analysis artifacts.
+# These are reproducible from the scripts in this repo and are kept locally
+# rather than published.
+# ---------------------------------------------------------------------------
 comparison_*/
-cosine_annealing_*
-hybrid_optimization_*
-multi_seed_*
-plots*
-avg_spectrum*
-spectrum_target*
-*__pycache__*
-.DS_Store
-runs*
-models/
+match_spectrum_*/
+multi_*/
+cosine_annealing_*/
+hybrid_optimization_*/
+lbfgs/
 exclusion_evaluation_results/
-results
+results/
+runs/
+plots/
+
+# Analysis tables and scan caches (root level only, so imgs/ is unaffected)
+approach_comparison.csv
+distribution_eval.csv
+wasserstein_loo.csv
+flatness_analysis.csv
+results.txt
+spectrum_target_*.csv
+/*.npz
+/*.png
+
+# ---------------------------------------------------------------------------
+# Model checkpoints. Only the final EMA checkpoint is published; the optimiser
+# states and intermediate epochs are not needed to reproduce any result.
+# ---------------------------------------------------------------------------
+models/*
+!models/edm_4kepochs
+models/edm_4kepochs/*
+!models/edm_4kepochs/ema_ckpt_final.pt
+
+# ---------------------------------------------------------------------------
+# LaTeX build artifacts
+# ---------------------------------------------------------------------------
+*.aux
+*.bcf
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+
+# ---------------------------------------------------------------------------
+# OS
+# ---------------------------------------------------------------------------
+.DS_Store
