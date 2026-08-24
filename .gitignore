@@ -25,7 +25,6 @@ plots/
 approach_comparison.csv
 distribution_eval.csv
 wasserstein_loo.csv
-flatness_analysis.csv
 results.txt
 spectrum_target_*.csv
 /*.npz

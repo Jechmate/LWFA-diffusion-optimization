@@ -57,7 +57,6 @@ Several scripts have offline self-checks that need no GPU:
 
 ```bash
 python plot_loss_landscape.py --self-test      # scan axis handling
-python flatness_analysis.py --self-test        # Hessian and Wilcoxon estimators
 python plot_loss_landscape.py --verify-batching 6   # batched == sequential
 ```
 

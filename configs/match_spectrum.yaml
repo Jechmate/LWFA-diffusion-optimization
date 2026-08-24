@@ -14,7 +14,11 @@ run:
   mode: comparison      # comparison | multi | extend
   output: null          # null -> auto timestamped directory
   approach: bayes_adam  # multi mode: which approach to run
-  approaches: null      # comparison/extend mode: subset of `approaches` below, null -> all
+  # comparison/extend mode: which approaches to run. null -> every approach
+  # defined below. The default is the set compared in the paper.
+  approaches: [bayesian_only, adam_only, lbfgs_only,
+               bayes_adam, bayes_lbfgs,
+               bayes_adam_lbfgs, bayes_lbfgs_adam]
   n_seeds: 10           # multi mode: how many seeds to draw
   multi_seed_base: 42   # multi mode: RNG seed used to draw those seeds
   comparison_seeds: [67, 156, 236, 391, 429, 504, 742, 782, 823, 918]
